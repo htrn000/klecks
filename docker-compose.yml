@@ -1,5 +1,6 @@
 services:
   klecks:
+    restart: unless-stopped
     build:
       context: .
       target: static
@@ -8,6 +9,7 @@ services:
     depends_on:
       - project-api
   project-api:
+    restart: unless-stopped
     build:
       context: .
       target: api
