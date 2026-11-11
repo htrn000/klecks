@@ -371,6 +371,7 @@ export class KlApp {
         const tempHistory = new KlTempHistory();
         let mainTabRow: TabRow | undefined = undefined;
         let activeFrameState: TActiveFrameSet | undefined;
+        let frameThumbnailRefreshTimeout: ReturnType<typeof setTimeout> | undefined;
         this.getActiveFrameState = () => activeFrameState;
         let framesUi: FramesUi | undefined;
         let isFrameActionInProgress = false;
@@ -1461,6 +1462,17 @@ export class KlApp {
 
         const showFrameLimitError = () => showError(LANG('frames-limit-reached'));
 
+        const createFrameThumbnail = (): string => {
+            const thumbnailCanvas = this.klCanvas.getCanvas(
+                64 / Math.max(this.klCanvas.getWidth(), this.klCanvas.getHeight()),
+            );
+            try {
+                return thumbnailCanvas.toDataURL('image/png');
+            } finally {
+                BB.freeCanvas(thumbnailCanvas);
+            }
+        };
+
         const captureCurrentFrame = async (frameId: string): Promise<TFrame | undefined> => {
             const layers = await Promise.all(
                 this.klCanvas.getLayers().map(async (layer) => ({
@@ -1473,9 +1485,7 @@ export class KlApp {
                     image: await canvasToBlob(layer.canvas, 'image/png'),
                 })),
             );
-            const thumbnailCanvas = this.klCanvas.getCanvas(64 / Math.max(this.klCanvas.getWidth(), this.klCanvas.getHeight()));
-            const thumbnail = thumbnailCanvas.toDataURL('image/png');
-            BB.freeCanvas(thumbnailCanvas);
+            const thumbnail = createFrameThumbnail();
             return { id: frameId, layers, thumbnail };
         };
 
@@ -1942,6 +1952,28 @@ export class KlApp {
         });
         framesUi.update(activeFrameState);
         framesUi.setIsVisible(false);
+        this.klHistory.addListener(() => {
+            if (!activeFrameState) {
+                if (frameThumbnailRefreshTimeout !== undefined) {
+                    clearTimeout(frameThumbnailRefreshTimeout);
+                    frameThumbnailRefreshTimeout = undefined;
+                }
+                return;
+            }
+            if (frameThumbnailRefreshTimeout !== undefined) {
+                clearTimeout(frameThumbnailRefreshTimeout);
+            }
+            frameThumbnailRefreshTimeout = setTimeout(() => {
+                frameThumbnailRefreshTimeout = undefined;
+                if (!activeFrameState) return;
+                const activeFrame =
+                    activeFrameState.frameSet.frames[activeFrameState.activeFrameIndex];
+                if (!activeFrame) return;
+                const thumbnail = createFrameThumbnail();
+                activeFrame.thumbnail = thumbnail;
+                framesUi.updateActiveThumbnail(thumbnail);
+            }, 400);
+        });
         this.layerPreview = new KL.LayerPreview({
             klRootEl: this.rootEl,
             onClick: () => {

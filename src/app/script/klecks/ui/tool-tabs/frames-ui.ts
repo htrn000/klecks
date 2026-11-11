@@ -17,6 +17,7 @@ export class FramesUi {
     private readonly params: TFramesUiParams;
     private isBusy = false;
     private state: TActiveFrameSet | undefined;
+    private activeThumbnailEl: HTMLImageElement | HTMLSpanElement | undefined;
 
     private createButton(
         label: string,
@@ -36,6 +37,7 @@ export class FramesUi {
 
     private render(): void {
         this.rootEl.replaceChildren();
+        this.activeThumbnailEl = undefined;
         if (!this.state) {
             BB.el({
                 parent: this.rootEl,
@@ -96,10 +98,16 @@ export class FramesUi {
                 image.src = frame.thumbnail;
                 image.alt = '';
                 button.append(image);
+                if (index === activeFrameIndex) {
+                    this.activeThumbnailEl = image;
+                }
             } else {
                 const emptyThumbnail = document.createElement('span');
                 emptyThumbnail.className = classes.thumbnail;
                 button.append(emptyThumbnail);
+                if (index === activeFrameIndex) {
+                    this.activeThumbnailEl = emptyThumbnail;
+                }
             }
             const number = document.createElement('span');
             number.className = classes.frameNumber;
@@ -131,5 +139,22 @@ export class FramesUi {
     update(state: TActiveFrameSet | undefined): void {
         this.state = state;
         this.render();
+    }
+
+    updateActiveThumbnail(thumbnail: string): void {
+        if (!this.state) return;
+        const frame = this.state.frameSet.frames[this.state.activeFrameIndex];
+        if (!frame || frame.thumbnail === thumbnail) return;
+        frame.thumbnail = thumbnail;
+        if (this.activeThumbnailEl instanceof HTMLImageElement) {
+            this.activeThumbnailEl.src = thumbnail;
+        } else if (this.activeThumbnailEl) {
+            const image = document.createElement('img');
+            image.className = classes.thumbnail;
+            image.src = thumbnail;
+            image.alt = '';
+            this.activeThumbnailEl.replaceWith(image);
+            this.activeThumbnailEl = image;
+        }
     }
 }
