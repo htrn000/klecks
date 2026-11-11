@@ -46,6 +46,8 @@ export type TFileUiParams = {
     onExportTypeChange: (type: TExportType) => void;
     onFileSelect: (fileList: FileList, optionStr: TDropOption) => void;
     onSaveImageToComputer: () => void;
+    onImportRnsSprite: (file: File) => void;
+    onExportRnsSprite: () => void;
     onNewImage: () => void;
     onShareImage: (callback: () => void) => void;
     onUpload: () => void;
@@ -141,6 +143,26 @@ export class FileUi {
             this.importInput.type = 'file';
             this.importInput.multiple = true;
             this.importInput.accept = 'image/*,.psd'; // .psd needed for chrome, although it's image/vnd.adobe.photoshop
+            const spriteInput = document.createElement('input');
+            spriteInput.type = 'file';
+            spriteInput.accept = 'image/png,.png';
+            spriteInput.style.display = 'none';
+            spriteInput.onchange = () => {
+                if (spriteInput.files?.[0]) p.onImportRnsSprite(spriteInput.files[0]);
+                spriteInput.value = '';
+            };
+            const rnsImportButton = BB.el({
+                tagName: 'button', className: 'kl-button grid-button',
+                textContent: LANG('rns-import-sprite'),
+                onClick: () => spriteInput.click(),
+                css: { width: 'calc(100% - 20px)', margin: '10px 10px 0' },
+            });
+            const rnsExportButton = BB.el({
+                tagName: 'button', className: 'kl-button grid-button',
+                textContent: LANG('rns-export-sprite'),
+                onClick: () => p.onExportRnsSprite(),
+                css: { width: 'calc(100% - 20px)', margin: '5px 10px 0' },
+            });
             const saveButton = BB.el({
                 tagName: 'button',
                 className: 'kl-button',
@@ -311,6 +333,8 @@ export class FileUi {
                 saveNote,
                 newButton,
                 importButton,
+                spriteInput,
+                rnsImportButton, rnsExportButton,
                 BB.el({ css: { clear: 'both' } }),
                 saveRow,
                 createSpacer(),

@@ -32,6 +32,8 @@ export type TFrameSheetGeometry = {
     trailingPaddingPx: number;
     sheetWidth: number;
     sheetHeight: number;
+    /** Exact RGBA bytes in the transparent tail, for lossless strip round-trips. */
+    trailingPixels?: Uint8Array;
 };
 
 export type TFrameSet = {
@@ -224,6 +226,9 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
             trailingPaddingPx: trailingPaddingPx as number,
             sheetWidth,
             sheetHeight,
+            ...(sheet.trailingPixels instanceof Uint8Array
+                ? { trailingPixels: sheet.trailingPixels.slice() }
+                : {}),
         };
     }
 

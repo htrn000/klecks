@@ -45,6 +45,7 @@ import {
     selectFrame,
     TActiveFrameSet,
     TFrame,
+    TFrameSheetGeometry,
 } from '../klecks/frames/frame-set';
 import { TCss, TVector2D } from '../bb/bb-types';
 import { asyncThrow, css, getFilenameDate, randomUuid, sleep } from '../bb/base/base';
@@ -90,6 +91,9 @@ import { getSelectionPath2d } from '../bb/multi-polygon/get-selection-path-2d';
 import { ToolspaceTopRow } from '../klecks/ui/components/toolspace-top-row';
 import { setupUnfocusOnClickService } from '../klecks/ui/onfocus-on-click-service';
 import { FloatingLayerPreview } from '../klecks/ui/components/floating-layer-preview';
+import { showRnsSpriteGeometryDialog } from '../klecks/ui/modals/rns-sprite-geometry-dialog';
+import { detectRnsSpriteGeometry, sliceRgbaSpriteSheet, stitchRgbaSpriteSheet } from '../klecks/frames/rns-sprite-sheet';
+import { saveAs } from '../bb/base/save-as';
 
 const toolPaintImg = getIconUrl('tool-paint');
 const toolHandImg = getIconUrl('tool-hand');
@@ -2410,6 +2414,142 @@ export class KlApp {
             closeLoader?.();
         };
 
+        const importRnsImage = async (
+            source: HTMLImageElement | HTMLCanvasElement,
+        ): Promise<void> => {
+            const sourceCanvas = BB.canvas(source.width, source.height);
+            const sourceCtx = BB.ctx(sourceCanvas, { willReadFrequently: true });
+            sourceCtx.drawImage(source, 0, 0);
+            const pixels = sourceCtx.getImageData(0, 0, source.width, source.height).data;
+            const occupiedColumns = new Uint8Array(source.width);
+            for (let y = 0; y < source.height; y++) {
+                for (let x = 0; x < source.width; x++) {
+                    if (pixels[(y * source.width + x) * 4 + 3]) occupiedColumns[x] = 1;
+                }
+            }
+            showRnsSpriteGeometryDialog({
+                sheetWidth: source.width,
+                sheetHeight: source.height,
+                occupiedColumns,
+                onCancel: () => BB.freeCanvas(sourceCanvas),
+                onConfirm: async (geometry) => {
+                    try {
+                        const raw = new Uint8Array(pixels);
+                        const split = sliceRgbaSpriteSheet(raw, geometry);
+                        geometry.trailingPixels = split.trailingPixels;
+                        const frames: TFrame[] = [];
+                        const referenceTrack: Record<string, unknown> = {};
+                        for (let index = 0; index < split.frames.length; index++) {
+                            const framePixels = new Uint8ClampedArray(split.frames[index]);
+                            const celCanvas = BB.canvas(geometry.cellWidth, geometry.cellHeight);
+                            BB.ctx(celCanvas).putImageData(
+                                new ImageData(framePixels, geometry.cellWidth, geometry.cellHeight),
+                                0,
+                                0,
+                            );
+                            const referenceCanvas = BB.canvas(geometry.cellWidth, geometry.cellHeight);
+                            BB.ctx(referenceCanvas).putImageData(
+                                new ImageData(new Uint8ClampedArray(split.frames[index]), geometry.cellWidth, geometry.cellHeight),
+                                0,
+                                0,
+                            );
+                            const id = randomUuid();
+                            referenceTrack[id] = referenceCanvas;
+                            const thumbnailCanvas = BB.canvas(64, 64);
+                            BB.ctx(thumbnailCanvas).drawImage(celCanvas, 0, 0, 64, 64);
+                            const thumbnail = thumbnailCanvas.toDataURL('image/png');
+                            BB.freeCanvas(thumbnailCanvas);
+                            frames.push({
+                                id,
+                                layers: [{
+                                    id: randomUuid(),
+                                    name: LANG('layers-layer') + ' 1',
+                                    isVisible: true,
+                                    opacity: 1,
+                                    mixModeStr: 'source-over',
+                                    hasClipping: false,
+                                    image: celCanvas,
+                                }],
+                                thumbnail,
+                            });
+                        }
+                        const frameSetInput = {
+                            width: geometry.cellWidth,
+                            height: geometry.cellHeight,
+                            frames,
+                            sheet: geometry,
+                            referenceTrack,
+                        };
+                        const result = createFrameSet(frameSetInput);
+                        if (!result.ok) {
+                            showError(result.error.message);
+                            return;
+                        }
+                        applyUncommitted();
+                        activeFrameState = { frameSet: result.value, activeFrameIndex: 0 };
+                        if (!(await restoreFrame(frames[0]))) {
+                            activeFrameState = undefined;
+                            showError(LANG('rns-import-failed'));
+                            return;
+                        }
+                        updateFramesUi();
+                        await refreshFrameOverlays();
+                        this.easel.resetOrFitTransform(true);
+                    } catch (error) {
+                        showError(error instanceof Error ? error.message : LANG('rns-import-failed'));
+                    } finally {
+                        BB.freeCanvas(sourceCanvas);
+                    }
+                },
+            });
+        };
+
+        const importRnsSpriteFile = async (file: File): Promise<void> => {
+            try {
+                const image = await loadImageFromBlob(file);
+                await importRnsImage(image);
+            } catch (error) {
+                showError(error instanceof Error ? error.message : LANG('rns-import-failed'));
+            }
+        };
+
+        const getCurrentSpritePng = async (): Promise<{ blob: Blob; geometry: TFrameSheetGeometry; pixels: Uint8Array } | undefined> => {
+            if (!activeFrameState) {
+                showError(LANG('rns-needs-frames'));
+                return;
+            }
+            if (!(await updateActiveFrameFromCanvas())) return;
+            const frameSet = activeFrameState.frameSet;
+            const geometry = frameSet.sheet ?? {
+                cellWidth: frameSet.width,
+                cellHeight: frameSet.height,
+                frameCount: frameSet.frames.length,
+                trailingPaddingPx: 0,
+                sheetWidth: frameSet.width * frameSet.frames.length,
+                sheetHeight: frameSet.height,
+            };
+            const cells: Uint8Array[] = [];
+            for (const frame of frameSet.frames) {
+                const composite = await createFrameComposite(frame);
+                cells.push(new Uint8Array(BB.ctx(composite, { willReadFrequently: true }).getImageData(0, 0, frameSet.width, frameSet.height).data));
+            }
+            const pixels = stitchRgbaSpriteSheet(cells, geometry, geometry.trailingPixels);
+            const output = BB.canvas(geometry.sheetWidth, geometry.sheetHeight);
+            BB.ctx(output).putImageData(new ImageData(new Uint8ClampedArray(pixels), geometry.sheetWidth, geometry.sheetHeight), 0, 0);
+            const blob = await canvasToBlob(output, 'image/png');
+            BB.freeCanvas(output);
+            return { blob, geometry, pixels };
+        };
+
+        const exportRnsSprite = async (): Promise<void> => {
+            try {
+                const result = await getCurrentSpritePng();
+                if (result) await saveAs('rabbit-and-steel-sprite.png', 'image/png', async () => result.blob);
+            } catch (error) {
+                showError(error instanceof Error ? error.message : LANG('rns-export-failed'));
+            }
+        };
+
         const fileUi = this.embed
             ? null
             : new KL.FileUi({
@@ -2427,6 +2567,8 @@ export class KlApp {
                       applyUncommitted();
                       this.saveToComputer.save();
                   },
+                  onImportRnsSprite: (file) => void importRnsSpriteFile(file),
+                  onExportRnsSprite: () => void exportRnsSprite(),
                   onNewImage: showNewImageDialog,
                   onShareImage: (callback) => {
                       applyUncommitted();
