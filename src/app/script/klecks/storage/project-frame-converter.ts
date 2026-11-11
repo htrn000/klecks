@@ -24,6 +24,7 @@ export async function projectFramesToStored<TImage>(
         height: frameSet.height,
         activeFrameIndex: frameSet.activeFrameIndex,
         ...(frameSet.sheet ? { sheet: { ...frameSet.sheet } } : {}),
+        ...(frameSet.rnsPackage ? { rnsPackage: frameSet.rnsPackage } : {}),
         ...(frameSet.referenceTrack
             ? {
                   referenceTrack: Object.fromEntries(
@@ -69,6 +70,7 @@ export async function storedFramesToProject<TImage>(
         height: frameSet.height,
         activeFrameIndex: frameSet.activeFrameIndex,
         ...(frameSet.sheet ? { sheet: { ...frameSet.sheet } } : {}),
+        ...(frameSet.rnsPackage ? { rnsPackage: frameSet.rnsPackage } : {}),
         ...(frameSet.referenceTrack
             ? {
                   referenceTrack: Object.fromEntries(

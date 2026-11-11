@@ -78,6 +78,7 @@ export class ProjectStore {
                 height: project.frames.height,
                 activeFrameIndex: project.frames.activeFrameIndex,
                 ...(project.frames.sheet ? { sheet: { ...project.frames.sheet } } : {}),
+                ...(project.frames.rnsPackage ? { rnsPackage: project.frames.rnsPackage } : {}),
                 frames: project.frames.frames.map((frame) => ({
                     id: frame.id,
                     ...(frame.thumbnail ? { thumbnail: frame.thumbnail } : {}),
@@ -207,6 +208,9 @@ export class ProjectStore {
                 activeFrameIndex: transactionResult.raw.frames.activeFrameIndex,
                 ...(transactionResult.raw.frames.sheet
                     ? { sheet: { ...transactionResult.raw.frames.sheet } }
+                    : {}),
+                ...(transactionResult.raw.frames.rnsPackage
+                    ? { rnsPackage: transactionResult.raw.frames.rnsPackage }
                     : {}),
                 frames: transactionResult.raw.frames.frames.map((frame) => ({
                     id: frame.id,

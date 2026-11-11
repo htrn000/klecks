@@ -65,10 +65,14 @@ Renaming a key across multiple language files:
   "frames-copy-reference": "Copy original to current layer",
   "frames-copy-reference-selection": "Copy original selection to current layer",
   "rns-import-sprite": "Import Sprite sheet (Rabbit and Steel)…",
+  "rns-import-package-zip": "Import R&S Mods ZIP…",
+  "rns-import-package-folder": "Import R&S Mods folder…",
   "rns-export-sprite": "Export R&S sprite sheet PNG",
+  "rns-export-package": "Export R&S Mods ZIP",
   "rns-import-failed": "Could not import the Rabbit and Steel sprite package.",
   "rns-export-failed": "Could not export the Rabbit and Steel sprite package.",
   "rns-needs-frames": "Import a Rabbit and Steel sprite sheet first.",
+  "rns-needs-package": "Import a Mods package before exporting a Mods ZIP.",
   "rns-geometry-title": "Sprite sheet geometry (Rabbit and Steel)",
   "rns-label-preset": "Preset",
   "rns-label-cell-width": "Cell width",
@@ -79,6 +83,8 @@ Renaming a key across multiple language files:
   "rns-no-preset-match": "No exact preset match. Enter a grid that fits the image.",
   "rns-invalid-geometry": "Geometry must be positive and frame cells plus trailing padding must equal the source width. Cell height must match source height.",
   "rns-import-frames": "Import frames",
+  "rns-select-animation": "Select R&S animation to edit (HQ)",
+  "rns-choose-sheet": "Choose sheet",
 
   "tool-brush": {
     hint: "tool that lets user paint (like in ms paint or photoshop)",

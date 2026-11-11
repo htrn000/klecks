@@ -36,6 +36,7 @@ import { newImageDialog } from './ui/modals/new-image-dialog';
 import { ToolspaceCollapser } from './ui/mobile/toolspace-collapser';
 import { textToolDialog } from './ui/modals/text-tool-dialog/text-tool-dialog';
 import { showImportImageDialog } from './ui/modals/show-import-image-dialog';
+import { showRnsSpriteGeometryDialog } from './ui/modals/rns-sprite-geometry-dialog';
 import * as PSD from './storage/psd';
 import { drawShape, ShapeTool } from './image-operations/shape-tool';
 import { KlCanvas } from './canvas/kl-canvas';
@@ -130,6 +131,7 @@ export const KL = {
     newImageDialog,
     textToolDialog,
     showImportImageDialog,
+    showRnsSpriteGeometryDialog,
     showIframePopup: showIframeModal,
     imgurUpload,
 

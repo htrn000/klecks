@@ -36,11 +36,23 @@ export type TFrameSheetGeometry = {
     trailingPixels?: Uint8Array;
 };
 
+export type TRnsPackageData = {
+    packageName: string;
+    files: Record<string, Uint8Array>;
+    animationKey: string;
+    highQualityPath: string;
+    lowQualityPath: string;
+    lowQualityWidth: number;
+    lowQualityHeight: number;
+};
+
 export type TFrameSet = {
     width: number;
     height: number;
     frames: TFrame[];
     sheet?: TFrameSheetGeometry;
+    /** Original package payload for byte-identical passthrough of metadata/other assets. */
+    rnsPackage?: TRnsPackageData;
     /** Optional read-only original image handles keyed by stable frame id. */
     referenceTrack?: Record<string, unknown>;
 };
@@ -128,7 +140,7 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
     if (!isRecord(input)) {
         return error('invalid-frame-set', 'FrameSet must be an object');
     }
-    const { width, height, frames, sheet, referenceTrack } = input;
+    const { width, height, frames, sheet, referenceTrack, rnsPackage } = input;
     if (!isPositiveSafeInteger(width) || !isPositiveSafeInteger(height)) {
         return error('invalid-size', 'Frame width and height must be positive safe integers');
     }
@@ -232,6 +244,20 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
         };
     }
 
+    if (
+        rnsPackage !== undefined &&
+        (!isRecord(rnsPackage) ||
+            typeof rnsPackage.packageName !== 'string' ||
+            !isRecord(rnsPackage.files) ||
+            typeof rnsPackage.animationKey !== 'string' ||
+            typeof rnsPackage.highQualityPath !== 'string' ||
+            typeof rnsPackage.lowQualityPath !== 'string' ||
+            !isPositiveSafeInteger(rnsPackage.lowQualityWidth) ||
+            !isPositiveSafeInteger(rnsPackage.lowQualityHeight))
+    ) {
+        return error('invalid-frame-set', 'R&S package metadata is invalid');
+    }
+
     return {
         ok: true,
         value: {
@@ -239,6 +265,7 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
             height,
             frames: validatedFrames,
             ...(validatedSheet ? { sheet: validatedSheet } : {}),
+            ...(rnsPackage ? { rnsPackage: rnsPackage as unknown as TRnsPackageData } : {}),
             ...(validatedReferenceTrack ? { referenceTrack: validatedReferenceTrack } : {}),
         },
         memoryBytes,
@@ -281,6 +308,7 @@ function operationResult(
         height: original.height,
         frames,
         ...(sheet ? { sheet } : {}),
+        ...(original.rnsPackage ? { rnsPackage: original.rnsPackage } : {}),
         ...(referenceTrack ? { referenceTrack } : {}),
     });
     return validation.ok

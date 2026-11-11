@@ -46,6 +46,7 @@ import {
     TActiveFrameSet,
     TFrame,
     TFrameSheetGeometry,
+    TRnsPackageData,
 } from '../klecks/frames/frame-set';
 import { TCss, TVector2D } from '../bb/bb-types';
 import { asyncThrow, css, getFilenameDate, randomUuid, sleep } from '../bb/base/base';
@@ -92,7 +93,8 @@ import { ToolspaceTopRow } from '../klecks/ui/components/toolspace-top-row';
 import { setupUnfocusOnClickService } from '../klecks/ui/onfocus-on-click-service';
 import { FloatingLayerPreview } from '../klecks/ui/components/floating-layer-preview';
 import { showRnsSpriteGeometryDialog } from '../klecks/ui/modals/rns-sprite-geometry-dialog';
-import { detectRnsSpriteGeometry, sliceRgbaSpriteSheet, stitchRgbaSpriteSheet } from '../klecks/frames/rns-sprite-sheet';
+import { detectRnsSpriteGeometry, sliceRgbaSpriteSheet, stitchRgbaSpriteSheet, scaleRgbaNearest } from '../klecks/frames/rns-sprite-sheet';
+import { applyRnsPackageEdits, listRnsAnimations, normalizeRnsFolderPath, readZipFile, rnsPackageNameFromPath, writeStoredZip, type TRnsPackageFiles } from '../klecks/frames/rns-package';
 import { saveAs } from '../bb/base/save-as';
 
 const toolPaintImg = getIconUrl('tool-paint');
@@ -141,6 +143,24 @@ function getToolspaceLayout(uiHeight: number): {
         isToolRowSmall,
         colorSliderHeight: Math.max(colorSliderMin, Math.min(colorSliderMax, available)),
     };
+}
+
+function readPngDimensions(bytes: Uint8Array): { width: number; height: number } {
+    if (
+        bytes.length < 24 ||
+        bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71 ||
+        bytes[4] !== 13 || bytes[5] !== 10 || bytes[6] !== 26 || bytes[7] !== 10
+    ) {
+        throw new Error('Package image is not a valid PNG');
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    return { width: view.getUint32(16), height: view.getUint32(20) };
+}
+
+function copyToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+    const copy = new Uint8Array(bytes.byteLength);
+    copy.set(bytes);
+    return copy.buffer;
 }
 
 type TKlAppOptionsEmbed = {
@@ -2416,6 +2436,7 @@ export class KlApp {
 
         const importRnsImage = async (
             source: HTMLImageElement | HTMLCanvasElement,
+            packageData?: TRnsPackageData,
         ): Promise<void> => {
             const sourceCanvas = BB.canvas(source.width, source.height);
             const sourceCtx = BB.ctx(sourceCanvas, { willReadFrequently: true });
@@ -2479,6 +2500,7 @@ export class KlApp {
                             frames,
                             sheet: geometry,
                             referenceTrack,
+                            ...(packageData ? { rnsPackage: packageData } : {}),
                         };
                         const result = createFrameSet(frameSetInput);
                         if (!result.ok) {
@@ -2508,6 +2530,75 @@ export class KlApp {
             try {
                 const image = await loadImageFromBlob(file);
                 await importRnsImage(image);
+            } catch (error) {
+                showError(error instanceof Error ? error.message : LANG('rns-import-failed'));
+            }
+        };
+
+        const importRnsPackageFiles = async (files: FileList): Promise<void> => {
+            try {
+                // Inputs are cleared immediately after the callback returns; FileList is live.
+                const fileArr = Array.from(files);
+                let packageFiles: TRnsPackageFiles;
+                let packageName = 'R&S Mod';
+                if (fileArr.length === 1 && fileArr[0].name.toLowerCase().endsWith('.zip')) {
+                    packageFiles = await readZipFile(fileArr[0]);
+                    packageName = fileArr[0].name.replace(/\.zip$/i, '');
+                } else {
+                    packageFiles = new Map();
+                    for (const file of fileArr) {
+                        const relative = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+                        const normalized = normalizeRnsFolderPath(relative || file.name, file.name);
+                        packageFiles.set(normalized, new Uint8Array(await file.arrayBuffer()));
+                    }
+                    const firstPath = packageFiles.keys().next().value as string | undefined;
+                    packageName = firstPath ? rnsPackageNameFromPath(firstPath, packageName) : packageName;
+                }
+                for (const path of packageFiles.keys()) {
+                    if (path.startsWith('/') || path.split('/').includes('..')) throw new Error('Unsafe path in Mods package');
+                }
+                const animations = listRnsAnimations(packageFiles);
+                const resolvePath = (path: string): string | undefined =>
+                    packageFiles.has(path) ? path : [...packageFiles.keys()].find((item) => item.endsWith('/' + path));
+                const resolved = animations.flatMap((animation) => {
+                    const highQualityPath = resolvePath(animation.highQualityPath);
+                    const lowQualityPath = resolvePath(animation.lowQualityPath);
+                    return highQualityPath && lowQualityPath
+                        ? [{ ...animation, highQualityPath, lowQualityPath }]
+                        : [];
+                });
+                if (!resolved.length) throw new Error('No animation rows with matching HQ and LQ files were found');
+                const select = BB.el({ tagName: 'select', className: 'kl-input' }) as HTMLSelectElement;
+                for (const item of resolved) {
+                    const option = BB.el({ tagName: 'option', textContent: `${item.key} — ${item.highQualityPath}` }) as HTMLOptionElement;
+                    option.value = item.key;
+                    select.append(option);
+                }
+                showModal({
+                    message: `<b>${LANG('rns-select-animation')}</b>`,
+                    div: BB.el({ content: select }),
+                    buttons: [{ id: 'select', label: LANG('rns-choose-sheet') }, 'Cancel'],
+                    primaries: ['select'],
+                    callback: async (choice) => {
+                        if (choice !== 'select') return;
+                        const animation = resolved.find((item) => item.key === select.value)!;
+                        const highQualityBytes = packageFiles.get(animation.highQualityPath)!;
+                        const lowQualityBytes = packageFiles.get(animation.lowQualityPath)!;
+                        const lowQualityDimensions = readPngDimensions(lowQualityBytes);
+                        const filesRecord = Object.fromEntries([...packageFiles].map(([path, data]) => [path, data]));
+                        const packageData: TRnsPackageData = {
+                            packageName,
+                            files: filesRecord,
+                            animationKey: animation.key,
+                            highQualityPath: animation.highQualityPath,
+                            lowQualityPath: animation.lowQualityPath,
+                            lowQualityWidth: lowQualityDimensions.width,
+                            lowQualityHeight: lowQualityDimensions.height,
+                        };
+                        const image = await loadImageFromBlob(new Blob([copyToArrayBuffer(highQualityBytes)], { type: 'image/png' }));
+                        await importRnsImage(image, packageData);
+                    },
+                });
             } catch (error) {
                 showError(error instanceof Error ? error.message : LANG('rns-import-failed'));
             }
@@ -2550,6 +2641,38 @@ export class KlApp {
             }
         };
 
+        const exportRnsPackage = async (): Promise<void> => {
+            try {
+                const result = await getCurrentSpritePng();
+                const packageData = activeFrameState?.frameSet.rnsPackage;
+                if (!result || !packageData) {
+                    showError(LANG('rns-needs-package'));
+                    return;
+                }
+                const lowQualityPixels = scaleRgbaNearest(
+                    result.pixels,
+                    result.geometry.sheetWidth,
+                    result.geometry.sheetHeight,
+                    packageData.lowQualityWidth,
+                    packageData.lowQualityHeight,
+                );
+                const lowCanvas = BB.canvas(packageData.lowQualityWidth, packageData.lowQualityHeight);
+                BB.ctx(lowCanvas).putImageData(new ImageData(new Uint8ClampedArray(lowQualityPixels), packageData.lowQualityWidth, packageData.lowQualityHeight), 0, 0);
+                const lowBlob = await canvasToBlob(lowCanvas, 'image/png');
+                BB.freeCanvas(lowCanvas);
+                const [hqBytes, lqBytes] = await Promise.all([
+                    result.blob.arrayBuffer().then((array) => new Uint8Array(array)),
+                    lowBlob.arrayBuffer().then((array) => new Uint8Array(array)),
+                ]);
+                const originalFiles = new Map(Object.entries(packageData.files));
+                const edited = applyRnsPackageEdits(originalFiles, packageData.highQualityPath, hqBytes, packageData.lowQualityPath, lqBytes);
+                const zip = writeStoredZip(edited);
+                await saveAs(`${packageData.packageName}-edited.zip`, 'application/zip', async () => new Blob([copyToArrayBuffer(zip)], { type: 'application/zip' }));
+            } catch (error) {
+                showError(error instanceof Error ? error.message : LANG('rns-export-failed'));
+            }
+        };
+
         const fileUi = this.embed
             ? null
             : new KL.FileUi({
@@ -2568,7 +2691,9 @@ export class KlApp {
                       this.saveToComputer.save();
                   },
                   onImportRnsSprite: (file) => void importRnsSpriteFile(file),
+                  onImportRnsPackage: (files) => void importRnsPackageFiles(files),
                   onExportRnsSprite: () => void exportRnsSprite(),
+                  onExportRnsPackage: () => void exportRnsPackage(),
                   onNewImage: showNewImageDialog,
                   onShareImage: (callback) => {
                       applyUncommitted();

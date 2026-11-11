@@ -20,6 +20,15 @@ test('FrameSet project/storage conversion preserves geometry, order, active inde
             sheetWidth: 1828,
             sheetHeight: 510,
         },
+        rnsPackage: {
+            packageName: 'Synthetic Mod',
+            files: { 'Animations.csv': new Uint8Array([1, 2, 3]) },
+            animationKey: 'anim_test',
+            highQualityPath: 'hero.png',
+            lowQualityPath: 'hero_lq.png',
+            lowQualityWidth: 300,
+            lowQualityHeight: 250,
+        },
         referenceTrack: {
             idle: 'original-idle',
             attack: 'original-attack',

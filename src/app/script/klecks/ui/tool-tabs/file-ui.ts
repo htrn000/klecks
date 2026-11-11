@@ -47,7 +47,9 @@ export type TFileUiParams = {
     onFileSelect: (fileList: FileList, optionStr: TDropOption) => void;
     onSaveImageToComputer: () => void;
     onImportRnsSprite: (file: File) => void;
+    onImportRnsPackage: (files: FileList) => void;
     onExportRnsSprite: () => void;
+    onExportRnsPackage: () => void;
     onNewImage: () => void;
     onShareImage: (callback: () => void) => void;
     onUpload: () => void;
@@ -151,16 +153,52 @@ export class FileUi {
                 if (spriteInput.files?.[0]) p.onImportRnsSprite(spriteInput.files[0]);
                 spriteInput.value = '';
             };
+            const packageZipInput = document.createElement('input');
+            packageZipInput.type = 'file';
+            packageZipInput.accept = '.zip,application/zip';
+            packageZipInput.style.display = 'none';
+            packageZipInput.onchange = () => {
+                if (packageZipInput.files?.length) p.onImportRnsPackage(packageZipInput.files);
+                packageZipInput.value = '';
+            };
+            const packageFolderInput = document.createElement('input');
+            packageFolderInput.type = 'file';
+            packageFolderInput.setAttribute('webkitdirectory', '');
+            packageFolderInput.setAttribute('directory', '');
+            packageFolderInput.multiple = true;
+            packageFolderInput.style.display = 'none';
+            packageFolderInput.onchange = () => {
+                if (packageFolderInput.files?.length) p.onImportRnsPackage(packageFolderInput.files);
+                packageFolderInput.value = '';
+            };
             const rnsImportButton = BB.el({
                 tagName: 'button', className: 'kl-button grid-button',
                 textContent: LANG('rns-import-sprite'),
                 onClick: () => spriteInput.click(),
                 css: { width: 'calc(100% - 20px)', margin: '10px 10px 0' },
             });
+            const rnsZipButton = BB.el({
+                tagName: 'button', className: 'kl-button grid-button',
+                textContent: LANG('rns-import-package-zip'),
+                onClick: () => packageZipInput.click(),
+                css: { width: 'calc(100% - 20px)', margin: '5px 10px 0' },
+            });
+            const rnsFolderButton = BB.el({
+                tagName: 'button', className: 'kl-button grid-button',
+                textContent: LANG('rns-import-package-folder'),
+                onClick: () => packageFolderInput.click(),
+                css: { width: 'calc(100% - 20px)', margin: '5px 10px 0' },
+            });
             const rnsExportButton = BB.el({
                 tagName: 'button', className: 'kl-button grid-button',
                 textContent: LANG('rns-export-sprite'),
                 onClick: () => p.onExportRnsSprite(),
+                css: { width: 'calc(100% - 20px)', margin: '5px 10px 0' },
+            });
+            const rnsPackageExportButton = BB.el({
+                tagName: 'button', className: 'kl-button grid-button',
+                textContent: LANG('rns-export-package'),
+                onClick: () => p.onExportRnsPackage(),
                 css: { width: 'calc(100% - 20px)', margin: '5px 10px 0' },
             });
             const saveButton = BB.el({
@@ -333,8 +371,8 @@ export class FileUi {
                 saveNote,
                 newButton,
                 importButton,
-                spriteInput,
-                rnsImportButton, rnsExportButton,
+                spriteInput, packageZipInput, packageFolderInput,
+                rnsImportButton, rnsZipButton, rnsFolderButton, rnsExportButton, rnsPackageExportButton,
                 BB.el({ css: { clear: 'both' } }),
                 saveRow,
                 createSpacer(),

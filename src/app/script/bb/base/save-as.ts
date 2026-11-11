@@ -13,6 +13,10 @@ const pickerTypes = {
         description: 'Adobe Photoshop Document',
         accept: { 'image/vnd.adobe.photoshop': ['.psd'] },
     },
+    'application/zip': {
+        description: 'ZIP Archive',
+        accept: { 'application/zip': ['.zip'] },
+    },
 };
 
 export type TFileSaveResult = 'saved' | 'cancel' | 'error';
