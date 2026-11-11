@@ -289,7 +289,6 @@ export const filterResize = {
         if (!klCanvas) {
             return false;
         }
-        klCanvas.resize(width, height, algorithm);
-        return true;
+        return klCanvas.resize(width, height, algorithm);
     },
 };

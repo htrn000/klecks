@@ -2,7 +2,7 @@ import { createCanvas } from '../../bb/base/create-canvas';
 import { BlendMode, Layer, Psd } from 'ag-psd/dist/psd';
 import { TKlProject, TKlPsd, TKlPsdError, TKlPsdLayer, TMixMode } from '../kl-types';
 import { LANG } from '../../language/language';
-import { MAX_LAYERS } from '../canvas/kl-canvas';
+import { maxLayersFor } from '../canvas/kl-canvas';
 import { BB } from '../../bb/bb';
 import { randomUuid, throwIfUndefined } from '../../bb/base/base';
 
@@ -91,7 +91,7 @@ export function psdToKlPsd(psdObj: Psd): TKlPsd {
     }
 
     // count resulting layers
-    const maxLayers = MAX_LAYERS;
+    const maxLayers = maxLayersFor(result.width, result.height);
     let layerCount = 0;
     function countWithinGroup(groupObj: Layer): number {
         let result = 0;

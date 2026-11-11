@@ -3,8 +3,12 @@ import { THistoryEntryDataComposed, THistoryEntryLayerTile } from '../history.ty
 import { canvasToLayerTiles } from './canvas-to-layer-tiles';
 import { getNextLayerId } from '../get-next-layer-id';
 import { BB } from '../../../bb/bb';
+import { maxLayersFor } from '../../canvas/kl-canvas';
 
 export function projectToComposed(project: TKlProject): THistoryEntryDataComposed {
+    if (project.layers.length > maxLayersFor(project.width, project.height)) {
+        throw new Error('Project exceeds the layer limit for its canvas size');
+    }
     let lastId: string = '';
     const layerMap = Object.fromEntries(
         project.layers.map((layer, index) => {

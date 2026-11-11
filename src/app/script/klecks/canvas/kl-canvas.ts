@@ -48,7 +48,20 @@ import { TIndexBounds } from '../../bb/bb-types';
 import { LayerCompositor } from './layer-compositor';
 import { getMixModeStr } from './get-mix-mode';
 
-export const MAX_LAYERS = 16;
+export const MAX_LAYERS = 64;
+export const LAYER_MEMORY_BUDGET_BYTES = 1024 * 1024 * 1024;
+
+export function maxLayersFor(width: number, height: number): number {
+    const bytesPerLayer = width * height * 4;
+    if (!Number.isFinite(bytesPerLayer) || bytesPerLayer <= 0) {
+        return 0;
+    }
+    return Math.min(MAX_LAYERS, Math.floor(LAYER_MEMORY_BUDGET_BYTES / bytesPerLayer));
+}
+
+export function canAddLayer(width: number, height: number, layerCount: number): boolean {
+    return layerCount < maxLayersFor(width, height);
+}
 
 export type TKlCanvasLayer = {
     id: TLayerId;
@@ -126,7 +139,7 @@ export class KlCanvas {
         layers?: (TKlNamedLayer<HTMLCanvasElement> & {
             id: TLayerId;
         })[];
-    }): number {
+    }): number | false {
         if (
             !p.width ||
             !p.height ||
@@ -136,6 +149,9 @@ export class KlCanvas {
             isNaN(p.height)
         ) {
             throw new Error('invalid canvas size');
+        }
+        if (p.layers && p.layers.length > maxLayersFor(p.width, p.height)) {
+            return false;
         }
         this.width = p.width;
         this.height = p.height;
@@ -205,7 +221,7 @@ export class KlCanvas {
     }
 
     isLayerLimitReached(): boolean {
-        return this.layers.length >= MAX_LAYERS;
+        return !canAddLayer(this.width, this.height, this.layers.length);
     }
 
     getWidth(): number {
@@ -242,6 +258,9 @@ export class KlCanvas {
         }
         w = Math.max(w, 1);
         h = Math.max(h, 1);
+        if (this.layers.length > maxLayersFor(w, h)) {
+            return false;
+        }
 
         let tmp1, tmp2;
 
@@ -306,6 +325,9 @@ export class KlCanvas {
         if (isNaN(newW) || isNaN(newH) || newW < 1 || newH < 1) {
             return false;
         }
+        if (this.layers.length > maxLayersFor(newW, newH)) {
+            return false;
+        }
 
         for (let i = 0; i < this.layers.length; i++) {
             const ctemp = BB.canvas(this.width, this.height);
@@ -354,7 +376,7 @@ export class KlCanvas {
             image: HTMLCanvasElement | HTMLImageElement | ((ctx: CanvasRenderingContext2D) => void);
         },
     ): false | number {
-        if (this.isLayerLimitReached()) {
+        if (!canAddLayer(this.width, this.height, this.layers.length)) {
             return false;
         }
         const index = selectedIndex === undefined ? this.layers.length : selectedIndex + 1;
@@ -416,7 +438,7 @@ export class KlCanvas {
     }
 
     duplicateLayer(srcIndex: number): false | number {
-        if (!this.layers[srcIndex] || this.isLayerLimitReached()) {
+        if (!this.layers[srcIndex] || !canAddLayer(this.width, this.height, this.layers.length)) {
             return false;
         }
         const srcLayer = this.layers[srcIndex];

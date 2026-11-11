@@ -1877,6 +1877,11 @@ export class KlApp {
                     };
                 }),
             });
+            if (layerIndex === false) {
+                closeLoader?.();
+                showFailureMessage();
+                return;
+            }
             this.layersUi.update(layerIndex);
             setCurrentLayer(layerIndex);
             this.easelProjectUpdater.update();

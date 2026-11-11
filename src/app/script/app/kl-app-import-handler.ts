@@ -69,6 +69,14 @@ export class KlAppImportHandler {
             };
         };
 
+        const showWarningPsdFlattened = () => {
+            showModal({
+                type: 'warning',
+                message: LANG('import-psd-unsupported') + '<br /><br />',
+                buttons: ['Ok'],
+            });
+        };
+
         const importAsImage = (canvas: HTMLCanvasElement | HTMLImageElement) => {
             this.applyUncommitted();
             const resizedDimensions = getResizedDimensions(canvas.width, canvas.height);
@@ -175,6 +183,10 @@ export class KlAppImportHandler {
                     height: convertedPsdObj.height,
                     image: convertedPsdObj.canvas,
                 });
+            }
+            if (layerIndex === false) {
+                showWarningPsdFlattened();
+                return;
             }
             this.layersUi.update(layerIndex);
             this.setCurrentLayer(layerIndex);
