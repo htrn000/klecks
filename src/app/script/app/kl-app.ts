@@ -993,14 +993,20 @@ export class KlApp {
                 if (comboStr === 'shift+e' && !isRepeat) {
                     event.preventDefault();
                     currentBrushUi.toggleEraser?.();
-                } else if (comboStr === 'e' && !isRepeat) {
+                } else if (['e', 'p', 'v'].includes(comboStr) && !isRepeat) {
                     event.preventDefault();
                     applyUncommitted();
                     this.toolspaceToolRow.setActive('brush');
                     this.easel.setTool('brush');
                     mainTabRow?.open('brush');
                     updateMainTabVisibility();
-                    brushTabRow.open('eraserBrush');
+                    brushTabRow.open(
+                        comboStr === 'e'
+                            ? 'eraserBrush'
+                            : comboStr === 'p'
+                              ? 'penBrush'
+                              : 'blendBrush',
+                    );
                 }
                 if (comboStr === 'b' && !isRepeat) {
                     event.preventDefault();

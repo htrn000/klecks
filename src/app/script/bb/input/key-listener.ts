@@ -49,10 +49,12 @@ const globalKey = ((): TGlobalKey => {
         h: ['h', 'H'],
         l: ['l', 'L'],
         m: ['m', 'M'],
+        p: ['p', 'P'],
         r: ['r', 'R'], // when holding shift
         s: ['s', 'S'],
         t: ['t', 'T'],
         u: ['u', 'U'],
+        v: ['v', 'V'],
         x: ['x', 'X'],
         y: ['y', 'Y'],
         z: ['z', 'Z'],
