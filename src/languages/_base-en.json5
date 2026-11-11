@@ -81,6 +81,7 @@ Renaming a key across multiple language files:
   "gif-export-action": "Export GIF",
   "gif-invalid-options": "Enter a valid frame range and FPS (1–100).",
   "gif-export-failed": "Couldn't create the GIF.",
+  "gif-export-error-prefix": "GIF export failed",
   "gif-progress-title": "Creating GIF",
   "gif-progress-preparing": "Preparing frames…",
   "gif-progress-encoding": "Encoding",

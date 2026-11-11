@@ -2814,7 +2814,8 @@ export class KlApp {
                 );
             } catch (error) {
                 if (!(error instanceof DOMException && error.name === 'AbortError')) {
-                    showError(error instanceof Error ? error.message : LANG('gif-export-failed'));
+                    const message = error instanceof Error ? error.message : LANG('gif-export-failed');
+                    showError(`${LANG('gif-export-error-prefix')}: ${message}`);
                 }
             } finally {
                 worker?.terminate();

@@ -94,7 +94,11 @@ export function showGifProgressDialog(): {
 }
 
 function numberInput(value: number, min: number, max: number): HTMLInputElement {
-    const input = BB.el({ tagName: 'input', className: 'kl-input' }) as HTMLInputElement;
+    const input = BB.el({
+        tagName: 'input',
+        className: 'kl-input',
+        css: { width: '100%', minWidth: 0, boxSizing: 'border-box' },
+    }) as HTMLInputElement;
     input.type = 'number';
     input.min = String(min);
     input.max = String(max);

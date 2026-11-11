@@ -2,10 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     fpsToCentisecondDelays,
+    encodeGifFrames,
     prepareGifPixels,
     scaleRgbaNearest,
     selectGifFrameRange,
 } from './gif-export.ts';
+
+test('real gifenc encoder path produces a GIF byte stream', () => {
+    const bytes = encodeGifFrames([{
+        width: 1,
+        height: 1,
+        pixels: Uint8Array.from([230, 40, 20, 255]),
+    }], { fps: 12, loop: 'once', transparency: true, scale: 1 });
+    assert.equal(new TextDecoder().decode(bytes.subarray(0, 6)), 'GIF89a');
+    assert.equal(bytes.at(-1), 0x3b);
+});
 
 test('12 fps distributes GIF centisecond rounding as an 8/9 pattern', () => {
     assert.deepEqual(fpsToCentisecondDelays(12, 6), [8, 9, 8, 8, 9, 8]);

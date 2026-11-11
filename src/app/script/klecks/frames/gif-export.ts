@@ -1,5 +1,12 @@
-import gifenc from 'gifenc';
+import * as gifencNamespace from 'gifenc';
 
+// Parcel selects gifenc's ESM module (named exports, default=GIFEncoder), while
+// Node's test runner sees its CommonJS entry (default=the full module object).
+const gifenc = (
+    typeof gifencNamespace.GIFEncoder === 'function'
+        ? gifencNamespace
+        : gifencNamespace.default
+);
 const { GIFEncoder, applyPalette, quantize } = gifenc;
 
 export type TRgbaFrame = { width: number; height: number; pixels: Uint8Array };
