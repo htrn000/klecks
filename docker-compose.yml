@@ -1,8 +1,18 @@
-version: '3'
-
 services:
   klecks:
-    build: .
-    container_name: klecks
+    build:
+      context: .
+      target: static
     ports:
-     - 5050:3000
+      - "${KLECKS_BIND:-127.0.0.1}:5050:5050"
+    depends_on:
+      - project-api
+  project-api:
+    build:
+      context: .
+      target: api
+    volumes:
+      - klecks-data:/data
+
+volumes:
+  klecks-data:

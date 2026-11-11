@@ -1,13 +1,22 @@
-FROM node
-
-COPY . /var/www
-WORKDIR /var/www
-
-RUN npm install serve -g
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
 RUN npm ci
-RUN npm run icon:build
-RUN npm run lang:build
-RUN npm run build
+COPY . .
+RUN npm run icon:build && npm run lang:build && npm run build
 
-ENTRYPOINT ["npx", "serve", "dist"]
+FROM node:22-alpine AS static
+WORKDIR /app
+COPY --from=build /app/dist ./dist
+COPY server/static-proxy.js ./server/static-proxy.js
+ENV STATIC_DIR=/app/dist PORT=5050 PROJECT_API_HOST=project-api PROJECT_API_PORT=3000
+EXPOSE 5050
+CMD ["node", "server/static-proxy.js"]
+
+FROM node:22-alpine AS api
+WORKDIR /app
+COPY server/package.json server/server.js ./server/
+ENV DATA_DIR=/data PORT=3000 HOST=0.0.0.0
+VOLUME ["/data"]
 EXPOSE 3000
+CMD ["node", "server/server.js"]

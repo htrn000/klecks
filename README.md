@@ -61,14 +61,24 @@ Created by developer/artist [bitbof](https://bitbof.com)
 # Embed
 Example usage of the embed can be found under: `/examples/embed/`
 
-# Docker
-To run Klecks (standalone) within a Docker container, run the following commands in project root:
+# Self-hosting with Docker (Tailscale)
 
-`docker-compose build`
+Run Klecks and its project store with Docker Compose:
 
-`docker-compose up -d`
+```sh
+docker compose up -d --build
+```
 
-It is then accessible through: http://localhost:5050
+Open http://localhost:5050. The `klecks-data` named volume stores projects under `/data`; back it up with your
+normal Docker volume backup process before upgrades or host maintenance. Upgrade by pulling the desired source
+revision and running `docker compose up -d --build` again; the project data volume is retained.
+
+For one-user access on a Tailscale network, keep the default loopback binding and publish the local port to the
+tailnet with `tailscale serve --bg 5050`. Alternatively bind directly to a Tailscale interface with
+`KLECKS_BIND=<tailscale-ip> docker compose up -d --build`.
+
+There is deliberately no app-level authentication: the intended trust boundary is the private Tailscale network.
+Do not expose the port to an untrusted network.
 
 # Contributing
 
