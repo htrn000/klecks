@@ -1,4 +1,4 @@
-import { TDeserializedKlStorageProject, TKlProject, TKlProjectMeta, TRawMeta } from '../kl-types';
+import { TDeserializedKlStorageProject, TKlProject, TKlProjectMeta, TMixMode, TRawMeta } from '../kl-types';
 import {
     PROJECT_STORE_THUMBNAIL_SIZE_PX,
     ProjectConverter,
@@ -37,6 +37,9 @@ export function getProjectImageDataIds(raw: TIdb['V2']['ProjectStore']['Read']):
     return [
         ...(isImageDataReference(raw.thumbnail) ? [raw.thumbnail.id] : []),
         ...raw.layers.flatMap((layer) => (isImageDataReference(layer.blob) ? [layer.blob.id] : [])),
+        ...(raw.frames?.frames.flatMap((frame) =>
+            frame.layers.flatMap((layer) => (isImageDataReference(layer.blob) ? [layer.blob.id] : [])),
+        ) ?? []),
     ];
 }
 
@@ -50,31 +53,52 @@ export class ProjectStore {
 
     private async lowLevelStore(project: TKlStorageProjectWrite): Promise<void> {
         const imageDataList: { id: string; data: Blob }[] = [];
-        const thumbnail = {
-            id: randomUuid(),
+        const blobRefs = new Map<Blob, { id: string }>();
+        const addImageBlob = (data: Blob): { id: string } => {
+            const existing = blobRefs.get(data);
+            if (existing) return existing;
+            const reference = { id: randomUuid() };
+            blobRefs.set(data, reference);
+            imageDataList.push({ id: reference.id, data });
+            return reference;
         };
-        imageDataList.push({
-            id: thumbnail.id,
-            data: project.thumbnail!,
-        });
+        const thumbnail = addImageBlob(project.thumbnail);
         const layers: TIdb['V2']['ProjectStore']['Write']['layers'] = [];
         for (const layer of project.layers) {
-            const blob = {
-                id: randomUuid(),
-            };
-            imageDataList.push({
-                id: blob.id,
-                data: layer.blob,
-            });
+            const blob = addImageBlob(layer.blob);
             layers.push({
                 ...layer,
                 blob,
             });
         }
+        let frames: TIdb['V2']['ProjectStore']['Write']['frames'];
+        if (project.frames) {
+            frames = {
+                width: project.frames.width,
+                height: project.frames.height,
+                activeFrameIndex: project.frames.activeFrameIndex,
+                ...(project.frames.sheet ? { sheet: { ...project.frames.sheet } } : {}),
+                frames: project.frames.frames.map((frame) => ({
+                    id: frame.id,
+                    ...(frame.thumbnail ? { thumbnail: frame.thumbnail } : {}),
+                    layers: frame.layers.map((layer) => ({
+                        id: layer.id,
+                        name: layer.name,
+                        isVisible: layer.isVisible,
+                        opacity: layer.opacity,
+                        mixModeStr: layer.mixModeStr,
+                        hasClipping: layer.hasClipping,
+                        blob: addImageBlob(layer.blob),
+                    })),
+                })),
+            };
+        }
+        const { frames: _projectFrames, ...projectWithoutFrames } = project;
         const raw: TIdb['V2']['ProjectStore']['Write'] = {
-            ...project,
+            ...projectWithoutFrames,
             thumbnail,
             layers,
+            ...(frames ? { frames } : {}),
         };
 
         await KL_INDEXED_DB.runTransaction(
@@ -175,11 +199,43 @@ export class ProjectStore {
                 };
             },
         );
+        let frames: TKlStorageProjectRead['frames'];
+        if (transactionResult.raw.frames) {
+            frames = {
+                width: transactionResult.raw.frames.width,
+                height: transactionResult.raw.frames.height,
+                activeFrameIndex: transactionResult.raw.frames.activeFrameIndex,
+                ...(transactionResult.raw.frames.sheet
+                    ? { sheet: { ...transactionResult.raw.frames.sheet } }
+                    : {}),
+                frames: transactionResult.raw.frames.frames.map((frame) => ({
+                    id: frame.id,
+                    ...(frame.thumbnail ? { thumbnail: frame.thumbnail } : {}),
+                    layers: frame.layers.map((layer) => {
+                        const storedBlob = isImageDataReference(layer.blob)
+                            ? transactionResult.imageDataById.get(layer.blob.id)
+                            : layer.blob;
+                        return {
+                            id: layer.id,
+                            name: layer.name,
+                            isVisible: layer.isVisible ?? true,
+                            opacity: layer.opacity,
+                            mixModeStr: getMixModeStr(layer.mixModeStr as TMixMode | undefined),
+                            hasClipping: layer.hasClipping ?? false,
+                            // Missing image data is left absent for ProjectConverter's fallback.
+                            blob: isBlob(storedBlob) ? storedBlob : undefined,
+                        };
+                    }),
+                })),
+            };
+        }
+        const { frames: _storedFrames, ...rawWithoutFrames } = transactionResult.raw;
         return {
-            ...transactionResult.raw,
+            ...rawWithoutFrames,
             projectId: transactionResult.raw.projectId ?? randomUuid(),
             thumbnail,
             layers,
+            ...(frames ? { frames } : {}),
         };
     }
 

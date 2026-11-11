@@ -1,3 +1,5 @@
+import type { TStoredFrameSet } from './project-frame-converter';
+
 /**
  * Versioned types for Kl_INDEXED_DB. Differentiates between reading and writing.
  * Reading needs to support old data. Writing can be cleaner.
@@ -113,6 +115,12 @@ export type TIdb = {
                         | TIdb['V2']['Common']['PngBlob']
                         | TIdb['V2']['ProjectStore']['ImageDataRef'];
                 }[];
+                frames?: TStoredFrameSet<
+                    | TIdb['V2']['Common']['PngBlob']
+                    | TIdb['V2']['ProjectStore']['ImageDataRef']
+                >;
+                referenceTrack?: Record<string, unknown>;
+                palette?: Record<string, unknown>;
             };
             Write: {
                 id: 1;
@@ -132,6 +140,9 @@ export type TIdb = {
                     hasClipping: boolean;
                     blob: TIdb['V2']['ProjectStore']['ImageDataRef'];
                 }[];
+                frames?: TStoredFrameSet<TIdb['V2']['ProjectStore']['ImageDataRef']>;
+                referenceTrack?: Record<string, unknown>;
+                palette?: Record<string, unknown>;
             };
         };
         RecoveryStore: {

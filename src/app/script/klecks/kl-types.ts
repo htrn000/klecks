@@ -2,6 +2,7 @@ import { KlCanvas, TKlCanvasLayer } from './canvas/kl-canvas';
 import { TTranslationCode } from '../../languages/languages';
 import { KlHistory } from './history/kl-history';
 import { THistoryEntryDataComposed, THistoryEntryLayerTile } from './history/history.types';
+import type { TFrameSetPayload } from './frames/frame-set';
 
 export type TFilterApply<T = unknown> = {
     layer: TKlCanvasLayer; // active layer
@@ -104,7 +105,14 @@ export type TKlProject = {
     height: number; // int
     layers: TKlProjectLayer[];
     projectId: TProjectId;
+    frames?: TFrameSetPayload;
+    referenceTrack?: TReferenceTrackData;
+    palette?: TProjectPaletteData;
 };
+
+/** Reserved project metadata containers for later frame-reference and palette slices. */
+export type TReferenceTrackData = Record<string, unknown>;
+export type TProjectPaletteData = Record<string, unknown>;
 
 export type TKlEmbedProjectLayer = Omit<
     TKlProjectLayer,

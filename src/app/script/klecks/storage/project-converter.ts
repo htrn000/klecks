@@ -9,6 +9,12 @@ import { BB } from '../../bb/bb';
 import { drawProject } from '../canvas/draw-project';
 import { canvasToBlob } from '../../bb/base/canvas';
 import { loadImageFromBlob } from '../../bb/base/load-image';
+import {
+    projectFramesToStored,
+    storedFramesToProject,
+    TStoredFrameSet,
+} from './project-frame-converter';
+import { validateFrameSet } from '../frames/frame-set';
 
 /**
  * project after being read from "browser storage" via "low level" methods
@@ -28,6 +34,9 @@ export type TKlStorageProjectRead = {
         hasClipping?: boolean;
         blob?: Blob; // png
     }[];
+    frames?: TStoredFrameSet<Blob | undefined>;
+    referenceTrack?: Record<string, unknown>;
+    palette?: Record<string, unknown>;
 };
 /**
  * project about to be stored into "browser storage" via "low level" methods
@@ -47,6 +56,9 @@ export type TKlStorageProjectWrite = {
         hasClipping: boolean;
         blob: Blob; // png
     }[];
+    frames?: TStoredFrameSet<Blob>;
+    referenceTrack?: Record<string, unknown>;
+    palette?: Record<string, unknown>;
 };
 
 export const PROJECT_STORE_THUMBNAIL_SIZE_PX = 240;
@@ -69,15 +81,33 @@ export class ProjectConverter {
     }
 
     static async createStorageProject(project: TKlProject): Promise<TKlStorageProjectWrite> {
+        const canvasBlobCache = new WeakMap<HTMLCanvasElement, Promise<Blob>>();
+        const toFrameBlob = async (image: unknown): Promise<Blob> => {
+            if (image instanceof Blob) {
+                return image;
+            }
+            if (image instanceof HTMLCanvasElement) {
+                let promise = canvasBlobCache.get(image);
+                if (!promise) {
+                    promise = canvasToBlob(image, 'image/png');
+                    canvasBlobCache.set(image, promise);
+                }
+                return promise;
+            }
+            if (image instanceof HTMLImageElement) {
+                const canvas = BB.canvas(project.width, project.height);
+                BB.ctx(canvas).drawImage(image, 0, 0);
+                try {
+                    return await canvasToBlob(canvas, 'image/png');
+                } finally {
+                    BB.freeCanvas(canvas);
+                }
+            }
+            throw new Error('Unsupported frame layer image');
+        };
         const layers: TKlStorageProjectWrite['layers'] = [];
         for (const item of project.layers) {
-            let blob;
-            if (item.image instanceof HTMLCanvasElement) {
-                blob = await canvasToBlob(item.image as HTMLCanvasElement, 'image/png');
-            } else {
-                // todo image
-                throw new Error('Not implemented');
-            }
+            const blob = await toFrameBlob(item.image);
             layers.push({
                 name: item.name,
                 isVisible: item.isVisible,
@@ -88,6 +118,8 @@ export class ProjectConverter {
             });
         }
 
+        const frames = await projectFramesToStored(project.frames, toFrameBlob);
+
         return {
             id: 1,
             projectId: project.projectId,
@@ -96,6 +128,9 @@ export class ProjectConverter {
             width: project.width,
             height: project.height,
             layers,
+            ...(frames ? { frames } : {}),
+            ...(project.referenceTrack ? { referenceTrack: project.referenceTrack } : {}),
+            ...(project.palette ? { palette: project.palette } : {}),
         };
     }
 
@@ -116,6 +151,28 @@ export class ProjectConverter {
                     ', ' +
                     storageProject.height,
             );
+        }
+        const framesWithImages = await storedFramesToProject(storageProject.frames, async (blob) => {
+            if (blob instanceof Blob) {
+                return loadImageFromBlob(blob).catch(
+                    () => new Image(storageProject.width, storageProject.height),
+                );
+            }
+            return new Image(storageProject.width, storageProject.height);
+        });
+        let frames: TKlProject['frames'];
+        if (framesWithImages) {
+            const { activeFrameIndex, ...frameSet } = framesWithImages;
+            const validation = validateFrameSet(frameSet);
+            if (
+                !validation.ok ||
+                !Number.isInteger(activeFrameIndex) ||
+                activeFrameIndex < 0 ||
+                activeFrameIndex >= validation.value.frames.length
+            ) {
+                throw new Error('readStorageProject invalid FrameSet');
+            }
+            frames = { ...validation.value, activeFrameIndex };
         }
         const project: TKlProject = {
             projectId: storageProject.projectId,
@@ -143,6 +200,11 @@ export class ProjectConverter {
                     image,
                 };
             }),
+            ...(frames ? { frames } : {}),
+            ...(storageProject.referenceTrack
+                ? { referenceTrack: storageProject.referenceTrack }
+                : {}),
+            ...(storageProject.palette ? { palette: storageProject.palette } : {}),
         };
 
         return {

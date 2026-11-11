@@ -203,6 +203,7 @@ export class KlApp {
     private readonly unloadWarningTrigger: UnloadWarningTrigger | undefined;
     private lastSavedHistoryIndex: number = 0;
     private readonly klHistory: KlHistory;
+    private getActiveFrameState?: () => TActiveFrameSet | undefined;
 
     private updateLastSaved(): void {
         this.lastSavedHistoryIndex = this.klHistory.getTotalIndex();
@@ -370,6 +371,7 @@ export class KlApp {
         const tempHistory = new KlTempHistory();
         let mainTabRow: TabRow | undefined = undefined;
         let activeFrameState: TActiveFrameSet | undefined;
+        this.getActiveFrameState = () => activeFrameState;
         let framesUi: FramesUi | undefined;
         let isFrameActionInProgress = false;
 
@@ -940,7 +942,7 @@ export class KlApp {
 
                                 let success = true;
                                 try {
-                                    await projectStore!.store(this.klCanvas.getProject());
+                                    await projectStore!.store(this.getProject());
                                 } catch (e) {
                                     success = false;
                                     asyncThrow(
@@ -2162,9 +2164,42 @@ export class KlApp {
                 showFailureMessage();
                 return;
             }
-            this.layersUi.update(layerIndex);
-            setCurrentLayer(layerIndex);
-            this.easelProjectUpdater.update();
+            if (project.project.frames) {
+                const { activeFrameIndex, ...frameSetData } = project.project.frames;
+                const validated = createFrameSet(frameSetData);
+                if (
+                    !validated.ok ||
+                    !Number.isInteger(activeFrameIndex) ||
+                    activeFrameIndex < 0 ||
+                    activeFrameIndex >= validated.value.frames.length
+                ) {
+                    activeFrameState = undefined;
+                    closeLoader?.();
+                    showFailureMessage();
+                    return;
+                }
+                activeFrameState = {
+                    frameSet: validated.value,
+                    activeFrameIndex,
+                };
+                framesUi?.update(activeFrameState);
+                const restoredFrame = await restoreFrame(
+                    activeFrameState.frameSet.frames[activeFrameIndex],
+                );
+                if (!restoredFrame) {
+                    activeFrameState = undefined;
+                    framesUi?.update(undefined);
+                    closeLoader?.();
+                    showFailureMessage();
+                    return;
+                }
+            } else {
+                activeFrameState = undefined;
+                framesUi?.update(undefined);
+                this.layersUi.update(layerIndex);
+                setCurrentLayer(layerIndex);
+                this.easelProjectUpdater.update();
+            }
             this.easel.resetOrFitTransform(true);
 
             setTimeout(() => {
@@ -2180,7 +2215,7 @@ export class KlApp {
                   klRootEl: this.rootEl,
                   helpPath: this.helpPath,
                   projectStore: projectStore,
-                  getProject: () => this.klCanvas.getProject(),
+                  getProject: () => this.getProject(),
                   exportType: exportType,
                   onExportTypeChange: (type) => {
                       exportType = type;
@@ -2677,7 +2712,43 @@ export class KlApp {
     };
 
     getProject(): TKlProject {
-        return this.klCanvas.getProject();
+        const project = this.klCanvas.getProject();
+        const frameState = this.getActiveFrameState?.();
+        if (!frameState) {
+            return project;
+        }
+        const activeFrame = frameState.frameSet.frames[frameState.activeFrameIndex];
+        const activeLayers = this.klCanvas.getLayers();
+        const thumbnailCanvas = this.klCanvas.getCanvas(
+            64 / Math.max(this.klCanvas.getWidth(), this.klCanvas.getHeight()),
+        );
+        const thumbnail = thumbnailCanvas.toDataURL('image/png');
+        BB.freeCanvas(thumbnailCanvas);
+        const frames = frameState.frameSet.frames.map((frame, index) =>
+            index === frameState.activeFrameIndex
+                ? {
+                      ...frame,
+                      thumbnail,
+                      layers: activeLayers.map((layer) => ({
+                          id: layer.id,
+                          name: layer.name,
+                          isVisible: layer.isVisible,
+                          opacity: layer.opacity,
+                          mixModeStr: layer.mixModeStr,
+                          hasClipping: layer.hasClipping,
+                          image: layer.canvas,
+                      })),
+                  }
+                : frame,
+        );
+        return {
+            ...project,
+            frames: {
+                ...frameState.frameSet,
+                frames,
+                activeFrameIndex: frameState.activeFrameIndex,
+            },
+        };
     }
 
     swapUiLeftRight(): void {

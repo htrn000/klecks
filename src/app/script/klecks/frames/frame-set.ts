@@ -41,6 +41,11 @@ export type TFrameSet = {
     sheet?: TFrameSheetGeometry;
 };
 
+/** Project-level FrameSet payload with the frame selected when the project was last stored. */
+export type TFrameSetPayload = TFrameSet & {
+    activeFrameIndex: number;
+};
+
 export type TFrameSetErrorCode =
     | 'invalid-frame-set'
     | 'invalid-size'
