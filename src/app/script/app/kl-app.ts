@@ -96,6 +96,7 @@ import { showRnsSpriteGeometryDialog } from '../klecks/ui/modals/rns-sprite-geom
 import { detectRnsSpriteGeometry, sliceRgbaSpriteSheet, stitchRgbaSpriteSheet, scaleRgbaNearest } from '../klecks/frames/rns-sprite-sheet';
 import { applyRnsPackageEdits, listRnsAnimations, normalizeRnsFolderPath, readZipFile, rnsPackageNameFromPath, writeStoredZip, type TRnsPackageFiles } from '../klecks/frames/rns-package';
 import { saveAs } from '../bb/base/save-as';
+import { maxLayersFor } from '../klecks/canvas/layer-limits';
 
 const toolPaintImg = getIconUrl('tool-paint');
 const toolHandImg = getIconUrl('tool-hand');
@@ -312,12 +313,13 @@ export class KlApp {
         setupUnfocusOnClickService();
         this.embed = p.embed;
         this.helpPath = p.helpPath ?? 'help.html';
-        // default 2048, unless your screen is bigger than that (that computer then probably has the horsepower for that)
-        // but not larger than 4096 - a fairly arbitrary decision
-        const maxCanvasSize = Math.min(
-            4096,
-            Math.max(2048, Math.max(window.screen.width, window.screen.height)),
-        );
+        // Keep mobile's existing 4096px limit. Desktop can use the largest
+        // square layer permitted by P8's 1 GiB per-layer memory budget.
+        const isMobileDevice =
+            /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const memoryBoundedCanvasSize = maxLayersFor(16384, 16384) > 0 ? 16384 : 4096;
+        const maxCanvasSize = isMobileDevice ? 4096 : memoryBoundedCanvasSize;
         this.uiLayout = (
             this.embed
                 ? 'left'
