@@ -1620,14 +1620,7 @@ export class KlApp {
         };
 
         const createFrameThumbnail = (): string => {
-            const thumbnailCanvas = this.klCanvas.getCanvas(
-                64 / Math.max(this.klCanvas.getWidth(), this.klCanvas.getHeight()),
-            );
-            try {
-                return thumbnailCanvas.toDataURL('image/png');
-            } finally {
-                BB.freeCanvas(thumbnailCanvas);
-            }
+            return this.createActiveFrameThumbnail();
         };
 
         const captureCurrentFrame = async (frameId: string): Promise<TFrame | undefined> => {
@@ -2143,7 +2136,6 @@ export class KlApp {
                     activeFrameState.frameSet.frames[activeFrameState.activeFrameIndex];
                 if (!activeFrame) return;
                 const thumbnail = createFrameThumbnail();
-                activeFrame.thumbnail = thumbnail;
                 framesUi.updateActiveThumbnail(thumbnail);
             }, 400);
         });
@@ -2929,11 +2921,7 @@ export class KlApp {
         const { referenceTrack, ...frameSet } = frameState.frameSet;
         const activeFrame = frameState.frameSet.frames[frameState.activeFrameIndex];
         const activeLayers = this.klCanvas.getLayers();
-        const thumbnailCanvas = this.klCanvas.getCanvas(
-            64 / Math.max(this.klCanvas.getWidth(), this.klCanvas.getHeight()),
-        );
-        const thumbnail = thumbnailCanvas.toDataURL('image/png');
-        BB.freeCanvas(thumbnailCanvas);
+        const thumbnail = this.createActiveFrameThumbnail();
         const frames = frameState.frameSet.frames.map((frame, index) =>
             index === frameState.activeFrameIndex
                 ? {
@@ -2960,6 +2948,16 @@ export class KlApp {
             },
             ...(referenceTrack ? { referenceTrack } : {}),
         };
+    }
+
+    private createActiveFrameThumbnail(): string {
+        const factor = 64 / Math.max(this.klCanvas.getWidth(), this.klCanvas.getHeight());
+        const thumbnailCanvas = drawProject(this.klCanvas.getProject(), factor, undefined, 'high');
+        try {
+            return thumbnailCanvas.toDataURL('image/png');
+        } finally {
+            BB.freeCanvas(thumbnailCanvas);
+        }
     }
 
     swapUiLeftRight(): void {

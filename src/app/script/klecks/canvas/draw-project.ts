@@ -10,6 +10,7 @@ export function drawProject(
     project: TKlProject,
     factor: number = 1,
     selection?: MultiPolygon,
+    imageSmoothingQuality: ImageSmoothingQuality = 'low',
 ): HTMLCanvasElement {
     const canvas = BB.canvas(
         Math.max(1, Math.round(project.width * factor)),
@@ -28,6 +29,9 @@ export function drawProject(
     }
     if (factor > 1) {
         ctx.imageSmoothingEnabled = false;
+    } else if (factor < 1) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = imageSmoothingQuality;
     }
     const compositor = new LayerCompositor();
     try {
