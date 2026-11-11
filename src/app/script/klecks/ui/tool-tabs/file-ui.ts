@@ -12,6 +12,8 @@ import { showRecoveryManagerPanel } from '../modals/recovery-manager-panel/show-
 import * as classes from './file-ui.module.scss';
 import { BrowserStorageHeaderUi } from '../components/browser-storage-header-ui';
 import { css } from '../../../bb/base/base';
+import { RemoteProjectStore } from '../../storage/remote-project-store';
+import { ServerProjectsUi } from '../components/server-projects-ui';
 
 const newImageImg = getIconUrl('new-image');
 const exportImg = getIconUrl('export');
@@ -41,6 +43,7 @@ export type TFileUiParams = {
     klRootEl: HTMLElement;
     helpPath: string;
     projectStore?: ProjectStore;
+    remoteProjectStore?: RemoteProjectStore;
     getProject: () => TKlProject;
     exportType: TExportType;
     onExportTypeChange: (type: TExportType) => void;
@@ -59,6 +62,7 @@ export type TFileUiParams = {
     onChangeShowSaveDialog: (b: boolean) => void;
     klRecoveryManager?: KlRecoveryManager;
     onOpenBrowserStorage: () => void;
+    onOpenServerProject: (id: string) => void;
     onStoredToBrowserStorage: () => void;
 };
 
@@ -263,6 +267,12 @@ export class FileUi {
             });
 
             // --- browser storage ---
+            const serverProjectsUi = p.remoteProjectStore ? new ServerProjectsUi({
+                store: p.remoteProjectStore,
+                getProject: p.getProject,
+                applyUncommitted: this.applyUncommitted,
+                onOpen: p.onOpenServerProject,
+            }) : undefined;
             let browserStorageFallbackEl: HTMLElement | undefined;
             if (p.projectStore) {
                 this.browserStorageUi = new BrowserStorageUi({
@@ -389,6 +399,7 @@ export class FileUi {
                 saveRow,
                 createSpacer(),
                 this.browserStorageUi?.getElement(),
+                serverProjectsUi?.getElement(),
                 browserStorageFallbackEl,
                 createSpacer(),
                 recoveryWrapper,

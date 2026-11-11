@@ -472,6 +472,15 @@ Renaming a key across multiple language files:
     "value": "Browser doesn't support storage"
   },
   "file-storage-failed-clear": "Failed to clear.",
+  "server-projects-title": "Server Projects",
+  "server-projects-save": "Save to server",
+  "server-projects-open": "Open from server",
+  "server-projects-delete": "Delete",
+  "server-projects-delete-confirm": "Delete this server project? This cannot be undone.",
+  "server-projects-name": "Project name",
+  "server-projects-empty": "No server projects yet.",
+  "server-projects-failed": "Server project operation failed",
+  "server-projects-restored": "Restored from Server",
   "file-upload": {
     "hint": "verb",
     "value": "Upload"

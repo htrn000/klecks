@@ -101,6 +101,7 @@ import { ProjectPaletteUi } from '../klecks/ui/components/project-palette-ui';
 import { extractPaletteFromRgba, normalizePalette, TProjectPaletteData } from '../klecks/palette/palette-model';
 import { selectGifFrameRange, TRgbaFrame } from '../klecks/frames/gif-export';
 import { showGifExportDialog, showGifProgressDialog, TGifExportRequest } from '../klecks/ui/modals/gif-export-dialog';
+import { RemoteProjectStore } from '../klecks/storage/remote-project-store';
 
 const toolPaintImg = getIconUrl('tool-paint');
 const toolHandImg = getIconUrl('tool-hand');
@@ -334,6 +335,7 @@ export class KlApp {
                   : 'right'
         ) as TUiLayout;
         const projectStore = KL_INDEXED_DB.getIsAvailable() ? new ProjectStore() : undefined;
+        const remoteProjectStore = new RemoteProjectStore();
         this.rootEl = BB.el({
             className: 'g-root',
             css: {
@@ -2332,6 +2334,63 @@ export class KlApp {
             );
         };
 
+        const restoreStoredProject = async (project: TDeserializedKlStorageProject): Promise<boolean> => {
+            applyUncommitted();
+            const layerIndex = this.klCanvas.reset({
+                projectId: project.project.projectId,
+                width: project.project.width,
+                height: project.project.height,
+                layers: project.project.layers.map((item) => {
+                    let image = item.image;
+                    if (!(image instanceof HTMLCanvasElement)) {
+                        image = BB.canvas(project.project.width, project.project.height);
+                        if (item.image instanceof HTMLImageElement) BB.ctx(image).drawImage(item.image, 0, 0);
+                    }
+                    return { ...item, id: randomUuid(), image };
+                }),
+            });
+            if (layerIndex === false) return false;
+            if (project.project.frames) {
+                const { activeFrameIndex, ...frameSetData } = project.project.frames;
+                const validated = createFrameSet({ ...frameSetData, referenceTrack: project.project.referenceTrack });
+                if (!validated.ok || !Number.isInteger(activeFrameIndex) || activeFrameIndex < 0 || activeFrameIndex >= validated.value.frames.length) {
+                    activeFrameState = undefined;
+                    return false;
+                }
+                activeFrameState = { frameSet: validated.value, activeFrameIndex };
+                updateFramesUi();
+                if (!(await restoreFrame(activeFrameState.frameSet.frames[activeFrameIndex]))) {
+                    activeFrameState = undefined;
+                    updateFramesUi();
+                    return false;
+                }
+            } else {
+                activeFrameState = undefined;
+                updateFramesUi();
+                this.layersUi.update(layerIndex);
+                setCurrentLayer(layerIndex);
+                this.easelProjectUpdater.update();
+            }
+            this.projectPalette = normalizePalette(project.project.palette);
+            paletteUi.setPalette(this.projectPalette);
+            await refreshFrameOverlays();
+            this.easel.resetOrFitTransform(true);
+            return true;
+        };
+
+        const onOpenServerProject = async (id: string) => {
+            let closeLoader: (() => void) | undefined;
+            showModal({ message: LANG('loading'), callback: () => { closeLoader = undefined; }, closeFunc: (f) => { closeLoader = f; } });
+            try {
+                const project = await remoteProjectStore.read(id);
+                if (!project || !(await restoreStoredProject(project))) throw new Error('Unable to restore project');
+                this.statusOverlay.out(LANG('server-projects-restored'));
+            } catch (error) {
+                showError(LANG('file-storage-open-failed'));
+                asyncThrow(error);
+            } finally { closeLoader?.(); }
+        };
+
         const onOpenBrowserStorage = async () => {
             const showFailureMessage = () => {
                 showError(LANG('file-storage-open-failed'));
@@ -2801,6 +2860,7 @@ export class KlApp {
                   klRootEl: this.rootEl,
                   helpPath: this.helpPath,
                   projectStore: projectStore,
+                  remoteProjectStore,
                   getProject: () => this.getProject(),
                   exportType: exportType,
                   onExportTypeChange: (type) => {
@@ -2841,6 +2901,7 @@ export class KlApp {
                   },
                   klRecoveryManager,
                   onOpenBrowserStorage,
+                  onOpenServerProject: (id) => void onOpenServerProject(id),
                   onStoredToBrowserStorage: () => {
                       this.updateLastSaved();
                   },
