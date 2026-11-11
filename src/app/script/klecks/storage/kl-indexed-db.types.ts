@@ -1,4 +1,5 @@
 import type { TStoredFrameSet } from './project-frame-converter';
+import type { TProjectPaletteData } from '../palette/palette-model';
 
 /**
  * Versioned types for Kl_INDEXED_DB. Differentiates between reading and writing.
@@ -120,7 +121,7 @@ export type TIdb = {
                     | TIdb['V2']['ProjectStore']['ImageDataRef']
                 >;
                 referenceTrack?: Record<string, unknown>;
-                palette?: Record<string, unknown>;
+                palette?: TProjectPaletteData;
             };
             Write: {
                 id: 1;
@@ -142,7 +143,7 @@ export type TIdb = {
                 }[];
                 frames?: TStoredFrameSet<TIdb['V2']['ProjectStore']['ImageDataRef']>;
                 referenceTrack?: Record<string, unknown>;
-                palette?: Record<string, unknown>;
+                palette?: TProjectPaletteData;
             };
         };
         RecoveryStore: {

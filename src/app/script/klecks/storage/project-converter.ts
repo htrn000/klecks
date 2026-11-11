@@ -4,6 +4,7 @@ import {
     TKlProjectMeta,
     TMixMode,
     TRawMeta,
+    TProjectPaletteData,
 } from '../kl-types';
 import { BB } from '../../bb/bb';
 import { drawProject } from '../canvas/draw-project';
@@ -38,7 +39,7 @@ export type TKlStorageProjectRead = {
     }[];
     frames?: TStoredFrameSet<Blob | undefined>;
     referenceTrack?: Record<string, unknown>;
-    palette?: Record<string, unknown>;
+    palette?: TProjectPaletteData;
 };
 /**
  * project about to be stored into "browser storage" via "low level" methods
@@ -60,7 +61,7 @@ export type TKlStorageProjectWrite = {
     }[];
     frames?: TStoredFrameSet<Blob>;
     referenceTrack?: Record<string, unknown>;
-    palette?: Record<string, unknown>;
+    palette?: TProjectPaletteData;
 };
 
 export const PROJECT_STORE_THUMBNAIL_SIZE_PX = 240;

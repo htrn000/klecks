@@ -97,6 +97,8 @@ import { detectRnsSpriteGeometry, sliceRgbaSpriteSheet, stitchRgbaSpriteSheet, s
 import { applyRnsPackageEdits, listRnsAnimations, normalizeRnsFolderPath, readZipFile, rnsPackageNameFromPath, writeStoredZip, type TRnsPackageFiles } from '../klecks/frames/rns-package';
 import { saveAs } from '../bb/base/save-as';
 import { maxLayersFor } from '../klecks/canvas/layer-limits';
+import { ProjectPaletteUi } from '../klecks/ui/components/project-palette-ui';
+import { extractPaletteFromRgba, normalizePalette, TProjectPaletteData } from '../klecks/palette/palette-model';
 
 const toolPaintImg = getIconUrl('tool-paint');
 const toolHandImg = getIconUrl('tool-hand');
@@ -197,6 +199,7 @@ type TKlAppToolId =
 
 export class KlApp {
     private readonly rootEl: HTMLElement;
+    private projectPalette: TProjectPaletteData = { colors: [] };
     private uiWidth: number;
     private uiHeight: number;
     private readonly helpPath: string;
@@ -311,6 +314,7 @@ export class KlApp {
 
     constructor(p: TKlAppParams) {
         setupUnfocusOnClickService();
+        this.projectPalette = normalizePalette(p.project?.palette);
         this.embed = p.embed;
         this.helpPath = p.helpPath ?? 'help.html';
         // Keep mobile's existing 4096px limit. Desktop can use the largest
@@ -1905,6 +1909,21 @@ export class KlApp {
                 alignItems: 'flex-end',
             },
         });
+        const paletteUi = new ProjectPaletteUi({
+            onChange: (palette) => { this.projectPalette = palette; },
+            onSetPrimary: (color) => setBrushColor(new BB.RGB(color.r, color.g, color.b)),
+            getPrimary: () => ({ r: currentColor.r, g: currentColor.g, b: currentColor.b }),
+            onExtract: () => {
+                const canvas = this.klCanvas.getCanvas();
+                try {
+                    const data = BB.ctx(canvas, { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height).data;
+                    return extractPaletteFromRgba(data, canvas.width, canvas.height);
+                } finally {
+                    BB.freeCanvas(canvas);
+                }
+            },
+        });
+        paletteUi.setPalette(this.projectPalette);
         const toolspaceStabilizerRow = new KL.ToolspaceStabilizerRow({
             smoothing: 1,
             onSelect: (v) => {
@@ -1917,6 +1936,7 @@ export class KlApp {
             this.klColorSlider.getElement(),
             this.klColorSlider.getOutputElement(),
             toolspaceStabilizerRow.getElement(),
+            paletteUi.getElement(),
         ]);
 
         const brushTabRow = new KL.TabRow({
@@ -2426,6 +2446,8 @@ export class KlApp {
                 setCurrentLayer(layerIndex);
                 this.easelProjectUpdater.update();
             }
+            this.projectPalette = normalizePalette(project.project.palette);
+            paletteUi.setPalette(this.projectPalette);
             await refreshFrameOverlays();
             this.easel.resetOrFitTransform(true);
 
@@ -3185,7 +3207,7 @@ export class KlApp {
         const project = this.klCanvas.getProject();
         const frameState = this.getActiveFrameState?.();
         if (!frameState) {
-            return project;
+            return { ...project, palette: this.projectPalette };
         }
         const { referenceTrack, ...frameSet } = frameState.frameSet;
         const activeFrame = frameState.frameSet.frames[frameState.activeFrameIndex];
@@ -3210,6 +3232,7 @@ export class KlApp {
         );
         return {
             ...project,
+            palette: this.projectPalette,
             frames: {
                 ...frameSet,
                 frames,

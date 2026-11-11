@@ -3,6 +3,8 @@ import { TTranslationCode } from '../../languages/languages';
 import { KlHistory } from './history/kl-history';
 import { THistoryEntryDataComposed, THistoryEntryLayerTile } from './history/history.types';
 import type { TFrameSetPayload } from './frames/frame-set';
+import type { TProjectPaletteData } from './palette/palette-model';
+export type { TProjectPaletteData } from './palette/palette-model';
 
 export type TFilterApply<T = unknown> = {
     layer: TKlCanvasLayer; // active layer
@@ -112,9 +114,6 @@ export type TKlProject = {
 
 /** Reference image handles keyed by stable FrameSet frame id. */
 export type TReferenceTrackData = Record<string, unknown>;
-/** Reserved project metadata slot for the future per-project palette. */
-export type TProjectPaletteData = Record<string, unknown>;
-
 export type TKlEmbedProjectLayer = Omit<
     TKlProjectLayer,
     'isVisible' | 'hasClipping' | 'mixModeStr'

@@ -17,6 +17,10 @@ const pickerTypes = {
         description: 'ZIP Archive',
         accept: { 'application/zip': ['.zip'] },
     },
+    'text/plain': {
+        description: 'Palette Text',
+        accept: { 'text/plain': ['.gpl', '.hex'] },
+    },
 };
 
 export type TFileSaveResult = 'saved' | 'cancel' | 'error';
