@@ -93,7 +93,7 @@ import { ToolspaceTopRow } from '../klecks/ui/components/toolspace-top-row';
 import { setupUnfocusOnClickService } from '../klecks/ui/onfocus-on-click-service';
 import { FloatingLayerPreview } from '../klecks/ui/components/floating-layer-preview';
 import { showRnsSpriteGeometryDialog } from '../klecks/ui/modals/rns-sprite-geometry-dialog';
-import { detectRnsSpriteGeometry, sliceRgbaSpriteSheet, stitchRgbaSpriteSheet, scaleRgbaNearest } from '../klecks/frames/rns-sprite-sheet';
+import { assembleRnsSpriteSheet, detectRnsSpriteGeometry, encodeRgbaPng, sliceRgbaSpriteSheet, scaleRgbaNearest } from '../klecks/frames/rns-sprite-sheet';
 import { applyRnsPackageEdits, listRnsAnimations, normalizeRnsFolderPath, readZipFile, rnsPackageNameFromPath, writeStoredZip, type TRnsPackageFiles } from '../klecks/frames/rns-package';
 import { saveAs } from '../bb/base/save-as';
 import { maxLayersFor } from '../klecks/canvas/layer-limits';
@@ -408,6 +408,9 @@ export class KlApp {
         let renderOverlays: { image: CanvasImageSource; opacity: number }[] = [];
         let onionComposite: { frame: TFrame; canvas: HTMLCanvasElement } | undefined;
         const referenceImageCache = new Map<string, CanvasImageSource>();
+        // Keep exact source/composite pixels per frame so export never rasterizes
+        // every stored layer through a shared canvas path.
+        const framePixelCache = new Map<string, Uint8Array>();
         let overlayRequestId = 0;
         let frameThumbnailRefreshTimeout: ReturnType<typeof setTimeout> | undefined;
         this.getActiveFrameState = () => activeFrameState;
@@ -1515,6 +1518,9 @@ export class KlApp {
 
         const updateFramesUi = () => {
             const frameIds = new Set(activeFrameState?.frameSet.frames.map((frame) => frame.id) ?? []);
+            for (const frameId of framePixelCache.keys()) {
+                if (!frameIds.has(frameId)) framePixelCache.delete(frameId);
+            }
             for (const frameId of referenceImageCache.keys()) {
                 if (!frameIds.has(frameId)) referenceImageCache.delete(frameId);
             }
@@ -1665,6 +1671,15 @@ export class KlApp {
                     image: await canvasToBlob(layer.canvas, 'image/png'),
                 })),
             );
+            const composite = this.klCanvas.getCanvas();
+            try {
+                framePixelCache.set(
+                    frameId,
+                    new Uint8Array(BB.ctx(composite, { willReadFrequently: true }).getImageData(0, 0, composite.width, composite.height).data),
+                );
+            } finally {
+                BB.freeCanvas(composite);
+            }
             const thumbnail = createFrameThumbnail();
             return { id: frameId, layers, thumbnail };
         };
@@ -2499,6 +2514,7 @@ export class KlApp {
                                 0,
                             );
                             const id = randomUuid();
+                            framePixelCache.set(id, split.frames[index].slice());
                             referenceTrack[id] = referenceCanvas;
                             const thumbnailCanvas = BB.canvas(64, 64);
                             BB.ctx(thumbnailCanvas).drawImage(celCanvas, 0, 0, 64, 64);
@@ -2533,6 +2549,7 @@ export class KlApp {
                         }
                         applyUncommitted();
                         activeFrameState = { frameSet: result.value, activeFrameIndex: 0 };
+                        showOriginal = true;
                         if (!(await restoreFrame(frames[0]))) {
                             activeFrameState = undefined;
                             showError(LANG('rns-import-failed'));
@@ -2645,14 +2662,26 @@ export class KlApp {
             };
             const cells: Uint8Array[] = [];
             for (const frame of frameSet.frames) {
-                const composite = await createFrameComposite(frame);
-                cells.push(new Uint8Array(BB.ctx(composite, { willReadFrequently: true }).getImageData(0, 0, frameSet.width, frameSet.height).data));
+                let pixels = framePixelCache.get(frame.id);
+                if (!pixels) {
+                    const composite = await createFrameComposite(frame);
+                    pixels = new Uint8Array(BB.ctx(composite, { willReadFrequently: true }).getImageData(0, 0, frameSet.width, frameSet.height).data);
+                    framePixelCache.set(frame.id, pixels);
+                }
+                cells.push(pixels);
             }
-            const pixels = stitchRgbaSpriteSheet(cells, geometry, geometry.trailingPixels);
-            const output = BB.canvas(geometry.sheetWidth, geometry.sheetHeight);
-            BB.ctx(output).putImageData(new ImageData(new Uint8ClampedArray(pixels), geometry.sheetWidth, geometry.sheetHeight), 0, 0);
-            const blob = await canvasToBlob(output, 'image/png');
-            BB.freeCanvas(output);
+            const activePixels = framePixelCache.get(frameSet.frames[activeFrameState.activeFrameIndex].id);
+            if (!activePixels) throw new Error('Active frame pixels are unavailable');
+            const pixels = assembleRnsSpriteSheet(
+                cells,
+                geometry,
+                geometry.trailingPixels,
+                activeFrameState.activeFrameIndex,
+                activePixels,
+            );
+            // Sheets like the supplied 16,828px strip exceed common 2D canvas
+            // backing limits; canvas encoding also corrupts low-alpha pixels.
+            const blob = await encodeRgbaPng(pixels, geometry.sheetWidth, geometry.sheetHeight);
             return { blob, geometry, pixels };
         };
 

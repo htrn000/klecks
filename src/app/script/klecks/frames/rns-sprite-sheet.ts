@@ -93,7 +93,7 @@ export function detectRnsSpriteGeometry(
     );
 }
 
-/** Slice one-row RGBA sheets into frame-sized RGBA buffers and retain all trailing bytes. */
+/** Slice horizontal RGBA cells row by row and retain the trailing columns exactly. */
 export function sliceRgbaSpriteSheet(
     pixels: Uint8Array,
     geometry: TFrameSheetGeometry,
@@ -111,12 +111,22 @@ export function sliceRgbaSpriteSheet(
     ) {
         throw new RangeError('Invalid sprite sheet geometry or RGBA buffer size');
     }
-    const frameBytes = cellWidth * cellHeight * 4;
-    const frames = Array.from({ length: frameCount }, (_, index) =>
-        pixels.slice(index * frameBytes, (index + 1) * frameBytes),
-    );
+    const rowBytes = sheetWidth * 4;
+    const cellRowBytes = cellWidth * 4;
+    const frames = Array.from({ length: frameCount }, () => new Uint8Array(cellWidth * cellHeight * 4));
+    for (let y = 0; y < cellHeight; y++) {
+        for (let index = 0; index < frameCount; index++) {
+            const sourceStart = y * rowBytes + index * cellRowBytes;
+            frames[index].set(pixels.subarray(sourceStart, sourceStart + cellRowBytes), y * cellRowBytes);
+        }
+    }
     const tailBytes = trailingPaddingPx * sheetHeight * 4;
-    return { frames, trailingPixels: pixels.slice(pixels.length - tailBytes) };
+    const trailingPixels = new Uint8Array(tailBytes);
+    for (let y = 0; y < sheetHeight; y++) {
+        const sourceStart = y * rowBytes + frameCount * cellRowBytes;
+        trailingPixels.set(pixels.subarray(sourceStart, sourceStart + trailingPaddingPx * 4), y * trailingPaddingPx * 4);
+    }
+    return { frames, trailingPixels };
 }
 
 /** Re-stitch frames and the untouched trailing buffer into the original RGBA sheet geometry. */
@@ -138,9 +148,86 @@ export function stitchRgbaSpriteSheet(
         throw new RangeError('Invalid frames, trailing pixels, or sprite sheet geometry');
     }
     const result = new Uint8Array(sheetWidth * sheetHeight * 4);
-    frames.forEach((frame, index) => result.set(frame, index * frameBytes));
-    if (trailingPixels) result.set(trailingPixels, frameBytes * frameCount);
+    const rowBytes = sheetWidth * 4;
+    const cellRowBytes = cellWidth * 4;
+    for (let y = 0; y < cellHeight; y++) {
+        for (let index = 0; index < frameCount; index++) {
+            const destinationStart = y * rowBytes + index * cellRowBytes;
+            result.set(frames[index].subarray(y * cellRowBytes, (y + 1) * cellRowBytes), destinationStart);
+        }
+    }
+    if (trailingPixels) {
+        for (let y = 0; y < sheetHeight; y++) {
+            const destinationStart = y * rowBytes + frameCount * cellRowBytes;
+            const tailStart = y * trailingPaddingPx * 4;
+            result.set(trailingPixels.subarray(tailStart, tailStart + trailingPaddingPx * 4), destinationStart);
+        }
+    }
     return result;
+}
+
+/** Assemble export cells, replacing only the active cell with its latest flattened pixels. */
+export function assembleRnsSpriteSheet(
+    framePixels: readonly Uint8Array[],
+    geometry: TFrameSheetGeometry,
+    trailingPixels: Uint8Array | undefined,
+    activeFrameIndex: number,
+    activeFramePixels: Uint8Array,
+): Uint8Array {
+    if (!Number.isInteger(activeFrameIndex) || activeFrameIndex < 0 || activeFrameIndex >= framePixels.length) {
+        throw new RangeError('Active frame index is outside the sprite sheet');
+    }
+    const cells = [...framePixels];
+    cells[activeFrameIndex] = activeFramePixels;
+    return stitchRgbaSpriteSheet(cells, geometry, trailingPixels);
+}
+
+const crcTable = new Uint32Array(256).map((_, index) => {
+    let value = index;
+    for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    return value >>> 0;
+});
+
+function pngChunk(type: string, data: Uint8Array): Uint8Array {
+    const result = new Uint8Array(12 + data.length);
+    const view = new DataView(result.buffer);
+    view.setUint32(0, data.length);
+    for (let index = 0; index < 4; index++) result[4 + index] = type.charCodeAt(index);
+    result.set(data, 8);
+    let crc = 0xffffffff;
+    for (let index = 4; index < 8 + data.length; index++) crc = crcTable[(crc ^ result[index]) & 0xff] ^ (crc >>> 8);
+    view.setUint32(8 + data.length, (crc ^ 0xffffffff) >>> 0);
+    return result;
+}
+
+/** Encode raw RGBA without drawing into a browser canvas (wide sprite sheets can exceed canvas limits). */
+export async function encodeRgbaPng(pixels: Uint8Array, width: number, height: number): Promise<Blob> {
+    if (
+        !Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1 ||
+        pixels.length !== width * height * 4 || typeof CompressionStream === 'undefined'
+    ) throw new RangeError('Invalid PNG pixels or dimensions');
+    const rowSize = width * 4;
+    const scanlines = new Uint8Array(height * (rowSize + 1));
+    for (let y = 0; y < height; y++) scanlines.set(pixels.subarray(y * rowSize, (y + 1) * rowSize), y * (rowSize + 1) + 1);
+    const compressed = new Uint8Array(await new Response(
+        new Blob([scanlines.buffer as ArrayBuffer]).stream().pipeThrough(new CompressionStream('deflate')),
+    ).arrayBuffer());
+    const header = new Uint8Array(13);
+    const view = new DataView(header.buffer);
+    view.setUint32(0, width);
+    view.setUint32(4, height);
+    header.set([8, 6, 0, 0, 0], 8);
+    const asArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
+        const buffer = new ArrayBuffer(bytes.length);
+        new Uint8Array(buffer).set(bytes);
+        return buffer;
+    };
+    return new Blob([
+        asArrayBuffer(Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])),
+        asArrayBuffer(pngChunk('IHDR', header)),
+        asArrayBuffer(pngChunk('IDAT', compressed)),
+        asArrayBuffer(pngChunk('IEND', new Uint8Array())),
+    ], { type: 'image/png' });
 }
 
 /** Nearest-neighbor coordinate mapping that preserves the original LQ dimensions. */
