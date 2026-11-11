@@ -45,6 +45,18 @@ Renaming a key across multiple language files:
     hint: "label for a tab that lets user save the image, import, upload, etc.",
     value: "File"
   },
+  "tab-frames": {
+    hint: "label for the animation frames panel",
+    value: "Frames"
+  },
+  "frames-empty": "Add a frame to start an animation. Your current drawing will become the first frame.",
+  "frames-add": "Add blank frame",
+  "frames-duplicate": "Duplicate frame",
+  "frames-delete": "Delete frame",
+  "frames-left": "Move left",
+  "frames-right": "Move right",
+  "frames-frame": "Frame",
+  "frames-limit-reached": "Frame memory limit reached. Delete frames or use a smaller canvas.",
 
   "tool-brush": {
     hint: "tool that lets user paint (like in ms paint or photoshop)",

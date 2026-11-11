@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFrameSet, FRAME_SET_MEMORY_BUDGET_BYTES } from './frame-set.ts';
+import {
+    addFrame,
+    createFrameSet,
+    deleteFrame,
+    duplicateFrame,
+    FRAME_SET_MEMORY_BUDGET_BYTES,
+    moveFrame,
+    selectFrame,
+} from './frame-set.ts';
 
 function makeFrames(count, layersPerFrame = 1) {
     return Array.from({ length: count }, (_, i) => ({
@@ -112,4 +120,62 @@ test('enforces the shared per-frame layer limit', () => {
     });
     assert.equal(result.ok, false);
     assert.equal(result.error.code, 'frame-layer-limit');
+});
+
+test('frame operations preserve order, unique ids, and active selection', () => {
+    const initial = createFrameSet({
+        width: 10,
+        height: 10,
+        frames: [
+            { id: 'a', layers: [{ id: 'la', image: 'pixels-a' }] },
+            { id: 'b', layers: [{ id: 'lb', image: 'pixels-b' }] },
+        ],
+    });
+    assert.equal(initial.ok, true);
+    let state = { frameSet: initial.value, activeFrameIndex: 0 };
+
+    let operation = addFrame(state, { id: 'c', layers: [{ id: 'lc', image: 'pixels-c' }] });
+    assert.equal(operation.ok, true);
+    state = operation.value;
+    assert.deepEqual(state.frameSet.frames.map((frame) => frame.id), ['a', 'c', 'b']);
+    assert.equal(state.activeFrameIndex, 1);
+
+    operation = duplicateFrame(state, 'c-copy', ['lc-copy']);
+    assert.equal(operation.ok, true);
+    state = operation.value;
+    assert.deepEqual(state.frameSet.frames.map((frame) => frame.id), ['a', 'c', 'c-copy', 'b']);
+    assert.equal(state.frameSet.frames[2].layers[0].id, 'lc-copy');
+    assert.equal(state.activeFrameIndex, 2);
+
+    operation = moveFrame(state, 2, 1);
+    assert.equal(operation.ok, true);
+    state = operation.value;
+    assert.deepEqual(state.frameSet.frames.map((frame) => frame.id), ['a', 'c', 'b', 'c-copy']);
+    assert.equal(state.activeFrameIndex, 3);
+
+    operation = selectFrame(state, 0);
+    assert.equal(operation.ok, true);
+    state = operation.value;
+    assert.equal(state.activeFrameIndex, 0);
+
+    operation = deleteFrame(state, 0);
+    assert.equal(operation.ok, true);
+    state = operation.value;
+    assert.deepEqual(state.frameSet.frames.map((frame) => frame.id), ['c', 'b', 'c-copy']);
+    assert.equal(state.activeFrameIndex, 0);
+    assert.equal(new Set(state.frameSet.frames.map((frame) => frame.id)).size, 3);
+});
+
+test('refuses deletion of the last frame without changing state', () => {
+    const initial = createFrameSet({
+        width: 10,
+        height: 10,
+        frames: [{ id: 'only', layers: [{ id: 'l', image: 'pixels' }] }],
+    });
+    assert.equal(initial.ok, true);
+    const state = { frameSet: initial.value, activeFrameIndex: 0 };
+    const operation = deleteFrame(state, 0);
+    assert.equal(operation.ok, false);
+    assert.equal(operation.error.code, 'last-frame');
+    assert.deepEqual(state.frameSet.frames.map((frame) => frame.id), ['only']);
 });

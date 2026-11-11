@@ -171,6 +171,23 @@ export class KlHistory {
         return this.composed;
     }
 
+    /**
+     * Start a fresh undo branch from the current composed state.
+     * Used when replacing a document state such as switching animation frames.
+     */
+    reseed(): void {
+        validateHistoryEntry(this.composed, this.composed.size);
+        this.entries = [
+            {
+                timestamp: Date.now(),
+                memoryEstimateBytes: estimateBytes(this.composed),
+                data: this.composed,
+            },
+        ];
+        this.index = 0;
+        this.broadcast();
+    }
+
     getChangeCount(): number {
         return this.changeCount;
     }

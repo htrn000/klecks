@@ -8,6 +8,11 @@ export const FRAME_SET_MEMORY_BUDGET_BYTES = 2 * LAYER_MEMORY_BUDGET_BYTES;
 
 export type TFrameLayer = {
     id: string;
+    name?: string;
+    isVisible?: boolean;
+    opacity?: number;
+    mixModeStr?: string;
+    hasClipping?: boolean;
     /** Opaque storage handle; the model does not depend on browser image types. */
     image: unknown;
 };
@@ -15,6 +20,8 @@ export type TFrameLayer = {
 export type TFrame = {
     id: string;
     layers: TFrameLayer[];
+    /** Optional thumbnail data URL for frame-strip presentation. */
+    thumbnail?: string;
 };
 
 /** Geometry for a one-row horizontal sprite sheet. Padding is retained after the last full cell. */
@@ -44,7 +51,9 @@ export type TFrameSetErrorCode =
     | 'frame-layer-limit'
     | 'invalid-sheet-geometry'
     | 'frame-count-mismatch'
-    | 'frame-set-memory-limit';
+    | 'frame-set-memory-limit'
+    | 'invalid-active-index'
+    | 'last-frame';
 
 export type TFrameSetError = {
     code: TFrameSetErrorCode;
@@ -54,6 +63,15 @@ export type TFrameSetError = {
 
 export type TFrameSetValidationResult =
     | { ok: true; value: TFrameSet; memoryBytes: bigint }
+    | { ok: false; error: TFrameSetError };
+
+export type TActiveFrameSet = {
+    frameSet: TFrameSet;
+    activeFrameIndex: number;
+};
+
+export type TFrameSetOperationResult =
+    | { ok: true; value: TActiveFrameSet }
     | { ok: false; error: TFrameSetError };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -133,13 +151,25 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
             if (!isRecord(layer) || typeof layer.id !== 'string' || !layer.id.trim() || !('image' in layer)) {
                 return error('invalid-layer-stack', 'Each layer needs a non-empty id and image handle', frameIndex);
             }
-            layers.push({ id: layer.id, image: layer.image });
+            layers.push({
+                id: layer.id,
+                image: layer.image,
+                ...(typeof layer.name === 'string' ? { name: layer.name } : {}),
+                ...(typeof layer.isVisible === 'boolean' ? { isVisible: layer.isVisible } : {}),
+                ...(typeof layer.opacity === 'number' ? { opacity: layer.opacity } : {}),
+                ...(typeof layer.mixModeStr === 'string' ? { mixModeStr: layer.mixModeStr } : {}),
+                ...(typeof layer.hasClipping === 'boolean' ? { hasClipping: layer.hasClipping } : {}),
+            });
         }
         memoryBytes += frameMemoryBytes(width, height, layers.length);
         if (memoryBytes > BigInt(FRAME_SET_MEMORY_BUDGET_BYTES)) {
             return error('frame-set-memory-limit', 'FrameSet exceeds its total decoded-memory budget', frameIndex);
         }
-        validatedFrames.push({ id: frame.id, layers });
+        validatedFrames.push({
+            id: frame.id,
+            layers,
+            ...(typeof frame.thumbnail === 'string' ? { thumbnail: frame.thumbnail } : {}),
+        });
     }
 
     let validatedSheet: TFrameSheetGeometry | undefined;
@@ -191,6 +221,145 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
 /** Build a detached FrameSet value, returning a typed validation error on invalid input. */
 export function createFrameSet(input: unknown): TFrameSetValidationResult {
     return validateFrameSet(input);
+}
+
+function validateOperationState(state: TActiveFrameSet): TFrameSetError | undefined {
+    if (
+        !Number.isInteger(state.activeFrameIndex) ||
+        state.activeFrameIndex < 0 ||
+        state.activeFrameIndex >= state.frameSet.frames.length
+    ) {
+        return { code: 'invalid-active-index', message: 'Active frame index is out of range' };
+    }
+    const validation = validateFrameSet(state.frameSet);
+    return validation.ok ? undefined : validation.error;
+}
+
+function operationResult(
+    frames: TFrame[],
+    activeFrameIndex: number,
+    original: TFrameSet,
+): TFrameSetOperationResult {
+    const sheet = original.sheet
+        ? {
+              ...original.sheet,
+              frameCount: frames.length,
+              sheetWidth:
+                  original.sheet.cellWidth * frames.length + original.sheet.trailingPaddingPx,
+          }
+        : undefined;
+    const validation = validateFrameSet({
+        width: original.width,
+        height: original.height,
+        frames,
+        ...(sheet ? { sheet } : {}),
+    });
+    return validation.ok
+        ? { ok: true, value: { frameSet: validation.value, activeFrameIndex } }
+        : { ok: false, error: validation.error };
+}
+
+/** Insert a new frame after the active frame and select it. */
+export function addFrame(state: TActiveFrameSet, frame: TFrame): TFrameSetOperationResult {
+    const invalidState = validateOperationState(state);
+    if (invalidState) return { ok: false, error: invalidState };
+    const frames = [...state.frameSet.frames];
+    const insertAt = state.activeFrameIndex + 1;
+    frames.splice(insertAt, 0, frame);
+    return operationResult(frames, insertAt, state.frameSet);
+}
+
+/** Duplicate the active frame while assigning caller-supplied unique frame and layer ids. */
+export function duplicateFrame(
+    state: TActiveFrameSet,
+    newFrameId: string,
+    newLayerIds: readonly string[],
+): TFrameSetOperationResult {
+    const invalidState = validateOperationState(state);
+    if (invalidState) return { ok: false, error: invalidState };
+    const source = state.frameSet.frames[state.activeFrameIndex];
+    if (newLayerIds.length !== source.layers.length) {
+        return {
+            ok: false,
+            error: { code: 'invalid-layer-stack', message: 'Duplicate needs one new id per layer' },
+        };
+    }
+    const duplicate: TFrame = {
+        ...source,
+        id: newFrameId,
+        layers: source.layers.map((layer, index) => ({ ...layer, id: newLayerIds[index] })),
+    };
+    return addFrame(state, duplicate);
+}
+
+/** Delete a frame, refusing to remove the last frame. */
+export function deleteFrame(state: TActiveFrameSet, index: number): TFrameSetOperationResult {
+    const invalidState = validateOperationState(state);
+    if (invalidState) return { ok: false, error: invalidState };
+    if (!Number.isInteger(index) || index < 0 || index >= state.frameSet.frames.length) {
+        return {
+            ok: false,
+            error: { code: 'invalid-active-index', message: 'Frame index is out of range' },
+        };
+    }
+    if (state.frameSet.frames.length === 1) {
+        return {
+            ok: false,
+            error: { code: 'last-frame', message: 'The last frame cannot be deleted' },
+        };
+    }
+    const frames = state.frameSet.frames.filter((_, frameIndex) => frameIndex !== index);
+    const activeFrameIndex =
+        index < state.activeFrameIndex
+            ? state.activeFrameIndex - 1
+            : index === state.activeFrameIndex
+              ? Math.min(index, frames.length - 1)
+              : state.activeFrameIndex;
+    return operationResult(frames, activeFrameIndex, state.frameSet);
+}
+
+/** Move the requested frame one slot left or right and keep the same active frame selected. */
+export function moveFrame(
+    state: TActiveFrameSet,
+    index: number,
+    direction: -1 | 1,
+): TFrameSetOperationResult {
+    const invalidState = validateOperationState(state);
+    if (invalidState) return { ok: false, error: invalidState };
+    const target = index + direction;
+    if (
+        !Number.isInteger(index) ||
+        index < 0 ||
+        target < 0 ||
+        target >= state.frameSet.frames.length
+    ) {
+        return {
+            ok: false,
+            error: { code: 'invalid-active-index', message: 'Frame cannot move beyond the strip' },
+        };
+    }
+    const frames = [...state.frameSet.frames];
+    [frames[index], frames[target]] = [frames[target], frames[index]];
+    const activeFrameIndex =
+        state.activeFrameIndex === index
+            ? target
+            : state.activeFrameIndex === target
+              ? index
+              : state.activeFrameIndex;
+    return operationResult(frames, activeFrameIndex, state.frameSet);
+}
+
+/** Select a frame without changing its order or ids. */
+export function selectFrame(state: TActiveFrameSet, index: number): TFrameSetOperationResult {
+    const invalidState = validateOperationState(state);
+    if (invalidState) return { ok: false, error: invalidState };
+    if (!Number.isInteger(index) || index < 0 || index >= state.frameSet.frames.length) {
+        return {
+            ok: false,
+            error: { code: 'invalid-active-index', message: 'Frame index is out of range' },
+        };
+    }
+    return { ok: true, value: { frameSet: state.frameSet, activeFrameIndex: index } };
 }
 
 /** Exposes the per-layer cap used by the canvas for callers that need preflight estimates. */

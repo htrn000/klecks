@@ -12,6 +12,7 @@ import {
     TGradient,
     TKlProject,
     TRgb,
+    TMixMode,
     TUiLayout,
 } from '../klecks/kl-types';
 import { importFilters } from '../klecks/filters/filters-lazy';
@@ -33,6 +34,17 @@ import { ToolspaceScroller } from '../klecks/ui/components/toolspace-scroller';
 import { translateSmoothing } from '../klecks/utils/translate-smoothing';
 import { KlAppImportHandler } from './kl-app-import-handler';
 import { LayersUi } from '../klecks/ui/tool-tabs/layers-ui/layers-ui';
+import { FramesUi } from '../klecks/ui/tool-tabs/frames-ui';
+import {
+    addFrame,
+    createFrameSet,
+    deleteFrame,
+    duplicateFrame,
+    moveFrame,
+    selectFrame,
+    TActiveFrameSet,
+    TFrame,
+} from '../klecks/frames/frame-set';
 import { TCss, TVector2D } from '../bb/bb-types';
 import { asyncThrow, css, getFilenameDate, randomUuid, sleep } from '../bb/base/base';
 import { createConsoleApi } from './console-api';
@@ -61,6 +73,7 @@ import { isHistoryEntryActiveLayerChange } from '../klecks/history/push-helpers/
 import { MobileUi } from '../klecks/ui/mobile/mobile-ui';
 import { MobileToolUi } from '../klecks/ui/mobile/mobile-tool-ui';
 import { canvasToBlob } from '../bb/base/canvas';
+import { loadImageFromBlob } from '../bb/base/load-image';
 import { projectToComposed } from '../klecks/history/push-helpers/project-to-composed';
 import { ERASE_COLOR } from '../klecks/brushes/erase-color';
 import { KlRecoveryManager } from '../klecks/storage/kl-recovery-manager';
@@ -356,6 +369,9 @@ export class KlApp {
         this.klCanvas = new KL.KlCanvas(this.klHistory, this.embed ? -1 : 1);
         const tempHistory = new KlTempHistory();
         let mainTabRow: TabRow | undefined = undefined;
+        let activeFrameState: TActiveFrameSet | undefined;
+        let framesUi: FramesUi | undefined;
+        let isFrameActionInProgress = false;
 
         const clearLayer = (showStatus?: boolean, ignoreSelection?: boolean) => {
             applyUncommitted();
@@ -511,6 +527,7 @@ export class KlApp {
         };
 
         const undo = (showMessage?: boolean) => {
+            if (isFrameActionInProgress) return;
             if (!tempHistory.canDecreaseIndex()) {
                 discardUncommitted();
             }
@@ -527,6 +544,7 @@ export class KlApp {
         };
 
         const redo = (showMessage?: boolean) => {
+            if (isFrameActionInProgress) return;
             const composedBefore = this.klHistory.getComposed();
             const result = klHistoryExecutor.redo();
             if (!result) {
@@ -842,6 +860,9 @@ export class KlApp {
 
         const keyListener = new BB.KeyListener({
             onDown: (keyStr, event, comboStr, isRepeat) => {
+                if (isFrameActionInProgress) {
+                    return;
+                }
                 if (KL.DIALOG_COUNTER.get() > 0 || BB.isInputFocused(true)) {
                     return;
                 }
@@ -1436,6 +1457,255 @@ export class KlApp {
             currentBrushUi.setLayer(this.klCanvas.getLayer(currentLayerIndex));
         };
 
+        const showFrameLimitError = () => showError(LANG('frames-limit-reached'));
+
+        const captureCurrentFrame = async (frameId: string): Promise<TFrame | undefined> => {
+            const layers = await Promise.all(
+                this.klCanvas.getLayers().map(async (layer) => ({
+                    id: layer.id,
+                    name: layer.name,
+                    isVisible: layer.isVisible,
+                    opacity: layer.opacity,
+                    mixModeStr: layer.mixModeStr,
+                    hasClipping: layer.hasClipping,
+                    image: await canvasToBlob(layer.canvas, 'image/png'),
+                })),
+            );
+            const thumbnailCanvas = this.klCanvas.getCanvas(64 / Math.max(this.klCanvas.getWidth(), this.klCanvas.getHeight()));
+            const thumbnail = thumbnailCanvas.toDataURL('image/png');
+            BB.freeCanvas(thumbnailCanvas);
+            return { id: frameId, layers, thumbnail };
+        };
+
+        const createBlankFrame = async (
+            frameId = randomUuid(),
+            layerId = randomUuid(),
+        ): Promise<TFrame> => {
+            const blankCanvas = BB.canvas(this.klCanvas.getWidth(), this.klCanvas.getHeight());
+            const image = await canvasToBlob(blankCanvas, 'image/png');
+            const thumbnailCanvas = BB.canvas(64, 64);
+            const thumbnail = thumbnailCanvas.toDataURL('image/png');
+            BB.freeCanvas(blankCanvas);
+            BB.freeCanvas(thumbnailCanvas);
+            return {
+                id: frameId,
+                layers: [
+                    {
+                        id: layerId,
+                        name: LANG('layers-layer') + ' 1',
+                        isVisible: true,
+                        opacity: 1,
+                        mixModeStr: 'source-over',
+                        hasClipping: false,
+                        image,
+                    },
+                ],
+                thumbnail,
+            };
+        };
+
+        const restoreFrame = async (frame: TFrame): Promise<boolean> => {
+            if (!activeFrameState) {
+                return false;
+            }
+            const temporaryCanvases: HTMLCanvasElement[] = [];
+            try {
+                const layers = await Promise.all(
+                    frame.layers.map(async (layer, index) => {
+                        let source: CanvasImageSource;
+                        if (layer.image instanceof Blob) {
+                            source = await loadImageFromBlob(layer.image);
+                        } else if (
+                            layer.image instanceof HTMLCanvasElement ||
+                            layer.image instanceof HTMLImageElement
+                        ) {
+                            source = layer.image;
+                        } else {
+                            throw new Error('Frame layer image is unavailable');
+                        }
+                        const canvas = BB.canvas(activeFrameState!.frameSet.width, activeFrameState!.frameSet.height);
+                        BB.ctx(canvas).drawImage(source, 0, 0);
+                        temporaryCanvases.push(canvas);
+                        return {
+                            id: layer.id,
+                            name: layer.name ?? LANG('layers-layer') + ' ' + (index + 1),
+                            isVisible: layer.isVisible ?? true,
+                            opacity: layer.opacity ?? 1,
+                            mixModeStr: (layer.mixModeStr ?? 'source-over') as TMixMode,
+                            hasClipping: layer.hasClipping ?? false,
+                            image: canvas,
+                        };
+                    }),
+                );
+                const layerIndex = this.klCanvas.reset({
+                    projectId: this.klCanvas.getProject().projectId,
+                    width: activeFrameState.frameSet.width,
+                    height: activeFrameState.frameSet.height,
+                    layers,
+                });
+                if (layerIndex === false) {
+                    showFrameLimitError();
+                    return false;
+                }
+                tempHistory.clear();
+                tempHistory.setIsActive(false);
+                this.klHistory.reseed();
+                setCurrentLayer(layerIndex);
+                this.layersUi.update(layerIndex);
+                this.easelProjectUpdater.update();
+                this.easelBrush.setLastDrawEvent();
+                return true;
+            } finally {
+                temporaryCanvases.forEach((canvas) => BB.freeCanvas(canvas));
+            }
+        };
+
+        const updateActiveFrameFromCanvas = async (): Promise<boolean> => {
+            if (!activeFrameState) {
+                return true;
+            }
+            const activeFrame = activeFrameState.frameSet.frames[activeFrameState.activeFrameIndex];
+            const captured = await captureCurrentFrame(activeFrame.id);
+            if (!captured) {
+                return false;
+            }
+            const frames = [...activeFrameState.frameSet.frames];
+            frames[activeFrameState.activeFrameIndex] = captured;
+            const result = createFrameSet({
+                ...activeFrameState.frameSet,
+                frames,
+            });
+            if (!result.ok) {
+                showFrameLimitError();
+                return false;
+            }
+            activeFrameState = { frameSet: result.value, activeFrameIndex: activeFrameState.activeFrameIndex };
+            return true;
+        };
+
+        const runFrameAction = async (action: () => Promise<void>): Promise<void> => {
+            if (isFrameActionInProgress) {
+                return;
+            }
+            applyUncommitted();
+            isFrameActionInProgress = true;
+            const previousToolspacePointerEvents = this.toolspace.style.pointerEvents;
+            this.toolspace.style.pointerEvents = 'none';
+            this.easel.setIsFrozen(true);
+            framesUi?.setBusy(true);
+            try {
+                await action();
+            } catch (error) {
+                showError(error instanceof Error ? error.message : LANG('frames-limit-reached'));
+            } finally {
+                isFrameActionInProgress = false;
+                this.toolspace.style.pointerEvents = previousToolspacePointerEvents;
+                this.easel.setIsFrozen(KL.DIALOG_COUNTER.get() > 0);
+                framesUi?.setBusy(false);
+                framesUi?.update(activeFrameState);
+            }
+        };
+
+        const addBlankFrame = async (): Promise<void> => {
+            if (!activeFrameState) {
+                const original = await captureCurrentFrame(randomUuid());
+                if (!original) return;
+                const blankId = randomUuid();
+                const blankLayerId = randomUuid();
+                const candidate = createFrameSet({
+                    width: this.klCanvas.getWidth(),
+                    height: this.klCanvas.getHeight(),
+                    frames: [
+                        original,
+                        {
+                            id: blankId,
+                            layers: [{ id: blankLayerId, image: undefined }],
+                        },
+                    ],
+                });
+                if (!candidate.ok) {
+                    showFrameLimitError();
+                    return;
+                }
+                const blank = await createBlankFrame(blankId, blankLayerId);
+                const result = createFrameSet({
+                    width: candidate.value.width,
+                    height: candidate.value.height,
+                    frames: [original, blank],
+                });
+                if (!result.ok) {
+                    showFrameLimitError();
+                    return;
+                }
+                activeFrameState = { frameSet: result.value, activeFrameIndex: 1 };
+                await restoreFrame(blank);
+                return;
+            }
+            if (!(await updateActiveFrameFromCanvas())) return;
+            const blankId = randomUuid();
+            const blankLayerId = randomUuid();
+            const candidate = addFrame(activeFrameState!, {
+                id: blankId,
+                layers: [{ id: blankLayerId, image: undefined }],
+            });
+            if (!candidate.ok) {
+                showFrameLimitError();
+                return;
+            }
+            const blank = await createBlankFrame(blankId, blankLayerId);
+            const result = addFrame(activeFrameState!, blank);
+            if (!result.ok) {
+                showFrameLimitError();
+                return;
+            }
+            activeFrameState = result.value;
+            await restoreFrame(blank);
+        };
+
+        const duplicateActiveFrame = async (): Promise<void> => {
+            if (!activeFrameState || !(await updateActiveFrameFromCanvas())) return;
+            const source = activeFrameState.frameSet.frames[activeFrameState.activeFrameIndex];
+            const result = duplicateFrame(
+                activeFrameState,
+                randomUuid(),
+                source.layers.map(() => randomUuid()),
+            );
+            if (!result.ok) {
+                showFrameLimitError();
+                return;
+            }
+            activeFrameState = result.value;
+            await restoreFrame(activeFrameState.frameSet.frames[activeFrameState.activeFrameIndex]);
+        };
+
+        const deleteActiveFrame = async (): Promise<void> => {
+            if (!activeFrameState || !(await updateActiveFrameFromCanvas())) return;
+            const result = deleteFrame(activeFrameState, activeFrameState.activeFrameIndex);
+            if (!result.ok) {
+                showFrameLimitError();
+                return;
+            }
+            activeFrameState = result.value;
+            await restoreFrame(activeFrameState.frameSet.frames[activeFrameState.activeFrameIndex]);
+        };
+
+        const moveActiveFrame = async (direction: -1 | 1): Promise<void> => {
+            if (!activeFrameState || !(await updateActiveFrameFromCanvas())) return;
+            const result = moveFrame(activeFrameState, activeFrameState.activeFrameIndex, direction);
+            if (!result.ok) return;
+            activeFrameState = result.value;
+            framesUi?.update(activeFrameState);
+        };
+
+        const selectActiveFrame = async (index: number): Promise<void> => {
+            if (!activeFrameState || index === activeFrameState.activeFrameIndex) return;
+            if (!(await updateActiveFrameFromCanvas())) return;
+            const result = selectFrame(activeFrameState, index);
+            if (!result.ok) return;
+            activeFrameState = result.value;
+            await restoreFrame(activeFrameState.frameSet.frames[index]);
+        };
+
         const brushDiv = BB.el();
         const colorDiv = BB.el({
             css: {
@@ -1660,6 +1930,16 @@ export class KlApp {
             onUpdateProject: () => this.easelProjectUpdater.update(),
             onClearLayer: () => clearLayer(false, true),
         });
+        framesUi = new FramesUi({
+            onAdd: () => runFrameAction(addBlankFrame),
+            onDuplicate: () => runFrameAction(duplicateActiveFrame),
+            onDelete: () => runFrameAction(deleteActiveFrame),
+            onMoveLeft: () => runFrameAction(() => moveActiveFrame(-1)),
+            onMoveRight: () => runFrameAction(() => moveActiveFrame(1)),
+            onSelect: (index) => runFrameAction(() => selectActiveFrame(index)),
+        });
+        framesUi.update(activeFrameState);
+        framesUi.setIsVisible(false);
         this.layerPreview = new KL.LayerPreview({
             klRootEl: this.rootEl,
             onClick: () => {
@@ -2104,6 +2384,21 @@ export class KlApp {
                     },
                 },
                 {
+                    id: 'frames',
+                    label: LANG('tab-frames'),
+                    title: LANG('tab-frames'),
+                    onOpen: () => {
+                        framesUi?.setIsVisible(true);
+                        framesUi?.update(activeFrameState);
+                    },
+                    onClose: () => {
+                        framesUi?.setIsVisible(false);
+                    },
+                    css: {
+                        padding: '0 7px',
+                    },
+                },
+                {
                     id: 'edit',
                     title: LANG('tab-edit'),
                     image: tabEditImg,
@@ -2179,6 +2474,7 @@ export class KlApp {
             shapeUi.getElement(),
             klAppSelect.getSelectUi().getElement(),
             this.layersUi.getElement(),
+            framesUi.getElement(),
             editUi.getElement(),
             fileUi ? fileUi.getElement() : undefined,
             settingsUi.getElement(),
