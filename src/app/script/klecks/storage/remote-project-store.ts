@@ -68,6 +68,15 @@ export function decodeRemoteRecord(project: Record<string, unknown>, blobs: Reco
     return visit(project) as TKlStorageProjectRead;
 }
 
+function isNetworkFailure(error: unknown): boolean {
+    return error instanceof TypeError &&
+        /failed to fetch|fetch failed|networkerror|network request failed|load failed/i.test(error.message);
+}
+
+function isNotFound(error: unknown): boolean {
+    return error instanceof Error && /(?:\(|\s)404\)?$/.test(error.message);
+}
+
 /** Remote counterpart to ProjectStore; browser storage remains an independent store. */
 export class RemoteProjectStore {
     private readonly fetcher: typeof fetch;
@@ -75,7 +84,7 @@ export class RemoteProjectStore {
     private currentId: string | undefined;
 
     constructor(fetcher: typeof fetch = fetch, converter?: TConverter) {
-        this.fetcher = fetcher;
+        this.fetcher = fetcher.bind(globalThis);
         this.converter = converter;
     }
 
@@ -86,7 +95,12 @@ export class RemoteProjectStore {
     }
 
     async isAvailable(): Promise<boolean> {
-        try { await this.list(); return true; } catch { return false; }
+        try { await this.list(); return true; } catch (error) {
+            if (!isNetworkFailure(error) && !isNotFound(error)) {
+                console.warn('Server project availability probe failed', error);
+            }
+            return false;
+        }
     }
 
     async store(project: TKlProject, name = 'Untitled', id = project.projectId): Promise<TRemoteProjectMeta> {

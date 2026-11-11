@@ -35,3 +35,35 @@ test('RemoteProjectStore save/list/read/delete uses converter and JSON-safe blob
     assert.equal((await store.clear('p-1')), undefined);
     assert.deepEqual(calls.map((x) => x[1]), ['PUT', 'GET', 'GET', 'DELETE']);
 });
+
+test('fetch is invoked with a valid global receiver', async () => {
+    let receiver;
+    const methodStyleFetch = async function () {
+        receiver = this;
+        if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation');
+        return new Response('[]', { status: 200 });
+    };
+    const store = new RemoteProjectStore(methodStyleFetch);
+    assert.equal(await store.isAvailable(), true);
+    assert.equal(receiver, globalThis);
+});
+
+test('availability warns on client errors but not missing routes or network failures', async () => {
+    const originalWarn = console.warn;
+    const warnings = [];
+    console.warn = (...args) => warnings.push(args);
+    try {
+        const notFound = new RemoteProjectStore(async () => new Response('', { status: 404 }));
+        const offline = new RemoteProjectStore(async () => { throw new TypeError('fetch failed'); });
+        const broken = new RemoteProjectStore(async () => { throw new TypeError('Illegal invocation'); });
+        assert.equal(await notFound.isAvailable(), false);
+        assert.equal(await offline.isAvailable(), false);
+        assert.equal(warnings.length, 0);
+        assert.equal(await broken.isAvailable(), false);
+        assert.equal(warnings.length, 1);
+        assert.match(warnings[0][0], /availability probe failed/);
+        assert.equal(warnings[0][1].message, 'Illegal invocation');
+    } finally {
+        console.warn = originalWarn;
+    }
+});
