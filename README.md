@@ -63,15 +63,30 @@ Example usage of the embed can be found under: `/examples/embed/`
 
 # Self-hosting with Docker (Tailscale)
 
-Run Klecks and its project store with Docker Compose:
+Prerequisites: Docker Engine and the Docker Compose v2 plugin. Clone the repository:
 
 ```sh
+git clone https://github.com/htrn000/klecks.git && cd klecks
 docker compose up -d --build
 ```
 
-Open http://localhost:5050. The `klecks-data` named volume stores projects under `/data`; back it up with your
-normal Docker volume backup process before upgrades or host maintenance. Upgrade by pulling the desired source
-revision and running `docker compose up -d --build` again; the project data volume is retained.
+Open http://localhost:5050. In the File tab, the Server section appears when the project API is available.
+
+```sh
+docker compose logs -f       # follow service logs
+docker compose down          # stop services; keep project data
+docker compose down -v       # stop services and DELETE saved projects
+```
+
+Projects are stored in the `klecks-data` named volume at `/data`. Back it up before host maintenance or upgrades;
+Compose prefixes volume names with the project name. Find the actual name with `docker volume ls`. For example,
+if the volume is `klecks_klecks-data`:
+
+```sh
+docker run --rm -v klecks_klecks-data:/data -v "$PWD":/backup alpine tar czf /backup/klecks-data.tgz -C /data .
+```
+
+Upgrade with `git pull && docker compose up -d --build`; the project volume is retained.
 
 For one-user access on a Tailscale network, keep the default loopback binding and publish the local port to the
 tailnet with `tailscale serve --bg 5050`. Alternatively bind directly to a Tailscale interface with
@@ -79,6 +94,22 @@ tailnet with `tailscale serve --bg 5050`. Alternatively bind directly to a Tails
 
 There is deliberately no app-level authentication: the intended trust boundary is the private Tailscale network.
 Do not expose the port to an untrusted network.
+
+To run the UI without the project API, build and run only the default static image:
+
+```sh
+docker build -t klecks . && docker run -d -p 127.0.0.1:5050:5050 klecks
+```
+
+UI-only mode has no server project storage; projects remain in browser storage.
+
+| Variable | Used by | Default | Purpose |
+| --- | --- | --- | --- |
+| `KLECKS_BIND` | Compose | `127.0.0.1` | Host address for port 5050; set to a Tailscale IP to bind directly. |
+| `DATA_DIR` | API container | `/data` | Directory for project records and blobs. |
+| `MAX_REQUEST_BYTES` | API container | `536870912` | Maximum JSON request body size in bytes (512 MiB). |
+
+Set API variables under `project-api.environment` in a Compose override file when changing their defaults.
 
 # Contributing
 
