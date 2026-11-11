@@ -63,92 +63,68 @@ function colorKey(color: TPaletteColor): number {
 }
 
 type THistogramColor = TPaletteColor & { count: number };
-type TColorBox = THistogramColor[];
+type TColorCluster = { representative: TPaletteColor; count: number };
 
-function channelRange(colors: readonly THistogramColor[], channel: 'r' | 'g' | 'b'): number {
-    let min = 255;
-    let max = 0;
-    for (const color of colors) {
-        min = Math.min(min, color[channel]);
-        max = Math.max(max, color[channel]);
+const PALETTE_MERGE_DISTANCE_SQUARED = 3 * 12 ** 2;
+
+function rgbDistanceSquared(a: TPaletteColor, b: TPaletteColor): number {
+    return (a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2;
+}
+
+/** Merge nearby shades into the most frequent shade, then retain the most common clusters. */
+function mergeAndCap(colors: THistogramColor[], maxColors: number): TPaletteColor[] {
+    const sorted = [...colors].sort((a, b) => b.count - a.count || colorKey(a) - colorKey(b));
+    const clusters: TColorCluster[] = [];
+    for (const color of sorted) {
+        const cluster = clusters.find((item) => rgbDistanceSquared(item.representative, color) <= PALETTE_MERGE_DISTANCE_SQUARED);
+        if (cluster) cluster.count += color.count;
+        else clusters.push({ representative: { r: color.r, g: color.g, b: color.b }, count: color.count });
     }
-    return max - min;
+    return clusters
+        .sort((a, b) => b.count - a.count || colorKey(a.representative) - colorKey(b.representative))
+        .slice(0, maxColors)
+        .map((cluster) => cluster.representative);
 }
 
-function boxWeight(colors: readonly THistogramColor[]): number {
-    return colors.reduce((sum, color) => sum + color.count, 0);
-}
-
-function boxRepresentative(colors: readonly THistogramColor[]): TPaletteColor {
-    const weight = boxWeight(colors);
-    return {
-        r: Math.round(colors.reduce((sum, color) => sum + color.r * color.count, 0) / weight),
-        g: Math.round(colors.reduce((sum, color) => sum + color.g * color.count, 0) / weight),
-        b: Math.round(colors.reduce((sum, color) => sum + color.b * color.count, 0) / weight),
-    };
-}
-
-/** Median-cut quantization; ties are resolved by channel and RGB order for stable output. */
-function quantize(colors: THistogramColor[], maxColors: number): TPaletteColor[] {
-    let boxes: TColorBox[] = [colors];
-    while (boxes.length < maxColors) {
-        let chosen = -1;
-        let chosenRange = -1;
-        let chosenWeight = -1;
-        for (let i = 0; i < boxes.length; i++) {
-            const box = boxes[i];
-            if (box.length < 2) continue;
-            const range = Math.max(channelRange(box, 'r'), channelRange(box, 'g'), channelRange(box, 'b'));
-            const weight = boxWeight(box);
-            if (range > chosenRange || (range === chosenRange && weight > chosenWeight)) {
-                chosen = i;
-                chosenRange = range;
-                chosenWeight = weight;
-            }
-        }
-        if (chosen < 0) break;
-        const box = boxes[chosen];
-        const ranges = { r: channelRange(box, 'r'), g: channelRange(box, 'g'), b: channelRange(box, 'b') };
-        const channel = (['r', 'g', 'b'] as const).find((key) => ranges[key] === Math.max(ranges.r, ranges.g, ranges.b))!;
-        const sorted = [...box].sort((a, b) => a[channel] - b[channel] || a.r - b.r || a.g - b.g || a.b - b.b);
-        const targetWeight = Math.ceil(boxWeight(sorted) / 2);
-        let cumulative = 0;
-        let split = 1;
-        for (let i = 0; i < sorted.length - 1; i++) {
-            cumulative += sorted[i].count;
-            if (cumulative >= targetWeight) {
-                split = i + 1;
-                break;
-            }
-        }
-        boxes.splice(chosen, 1, sorted.slice(0, split), sorted.slice(split));
-    }
-    return boxes.map(boxRepresentative);
-}
-
-/** Return exact opaque RGB colors up to 64; use deterministic median-cut above that. */
+/** Keep up to 64 exact colors; above that, merge antialiased shades and favor frequent opaque pixels. */
 export function extractPaletteFromRgba(
     pixels: ArrayLike<number>,
     width: number,
     height: number,
     maxColors = MAX_PROJECT_PALETTE_COLORS,
 ): TProjectPaletteData {
+    const colorLimit = Math.min(maxColors, MAX_PROJECT_PALETTE_COLORS);
     if (
         !Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1 ||
-        pixels.length !== width * height * 4 || !Number.isInteger(maxColors) || maxColors < 1
+        pixels.length !== width * height * 4 || !Number.isInteger(maxColors) || colorLimit < 1
     ) return { colors: [] };
     const histogram = new Map<number, THistogramColor>();
+    let uniqueColorCount = 0;
     for (let offset = 0; offset < pixels.length; offset += 4) {
         if (!pixels[offset + 3]) continue;
         const color = { r: pixels[offset], g: pixels[offset + 1], b: pixels[offset + 2] };
         const key = colorKey(color);
         const existing = histogram.get(key);
         if (existing) existing.count++;
-        else histogram.set(key, { ...color, count: 1 });
+        else {
+            uniqueColorCount++;
+            histogram.set(key, { ...color, count: 1 });
+        }
     }
-    const colors = [...histogram.values()];
-    if (colors.length <= maxColors) return { colors: colors.map(({ r, g, b }) => ({ r, g, b })) };
-    return { colors: quantize(colors, Math.min(maxColors, MAX_PROJECT_PALETTE_COLORS)) };
+    if (uniqueColorCount <= colorLimit) return { colors: [...histogram.values()].map(({ r, g, b }) => ({ r, g, b })) };
+
+    const opaqueHistogram = new Map<number, THistogramColor>();
+    for (let offset = 0; offset < pixels.length; offset += 4) {
+        if (pixels[offset + 3] < 128) continue;
+        const color = { r: pixels[offset], g: pixels[offset + 1], b: pixels[offset + 2] };
+        const key = colorKey(color);
+        const existing = opaqueHistogram.get(key);
+        if (existing) existing.count++;
+        else opaqueHistogram.set(key, { ...color, count: 1 });
+    }
+    return {
+        colors: mergeAndCap([...opaqueHistogram.values()], colorLimit),
+    };
 }
 
 export function serializeHexPalette(palette: unknown): string {

@@ -24,6 +24,7 @@ export type TFramesReferenceUiState = {
     showOriginal: boolean;
     showOnion: boolean;
     opacity: number;
+    hasSelection: boolean;
 };
 
 export class FramesUi {
@@ -38,7 +39,9 @@ export class FramesUi {
         showOriginal: false,
         showOnion: false,
         opacity: 0.35,
+        hasSelection: false,
     };
+    private copySelectionButton: HTMLButtonElement | undefined;
 
     private createButton(
         label: string,
@@ -80,6 +83,11 @@ export class FramesUi {
 
         const { frameSet, activeFrameIndex } = this.state;
         const actions = BB.el({ parent: this.rootEl, className: classes.actions });
+        this.copySelectionButton = this.createButton(
+            LANG('frames-copy-reference-selection'),
+            this.params.onCopySelection,
+            !this.referenceUiState.hasReference || !this.referenceUiState.hasSelection,
+        );
         actions.append(
             this.createButton(LANG('frames-add'), this.params.onAdd),
             this.createButton(LANG('frames-duplicate'), this.params.onDuplicate),
@@ -107,11 +115,7 @@ export class FramesUi {
                 this.params.onCopyOriginal,
                 !this.referenceUiState.hasReference,
             ),
-            this.createButton(
-                LANG('frames-copy-reference-selection'),
-                this.params.onCopySelection,
-                !this.referenceUiState.hasReference,
-            ),
+            this.copySelectionButton,
         );
 
         const overlayOptions = BB.el({ parent: this.rootEl, className: classes.actions });
@@ -136,8 +140,15 @@ export class FramesUi {
         opacity.value = String(Math.round(this.referenceUiState.opacity * 100));
         opacity.disabled = this.isBusy;
         opacity.setAttribute('aria-label', LANG('frames-overlay-opacity'));
-        opacity.addEventListener('input', () => this.params.onOpacityChange(Number(opacity.value) / 100));
-        overlayOptions.append(showOriginalLabel, showOnionLabel, opacity);
+        const opacityLabel = document.createElement('label');
+        const opacityValue = document.createElement('span');
+        opacityValue.textContent = `${opacity.value}%`;
+        opacity.addEventListener('input', () => {
+            opacityValue.textContent = `${opacity.value}%`;
+            this.params.onOpacityChange(Number(opacity.value) / 100);
+        });
+        opacityLabel.append(document.createTextNode(`${LANG('frames-overlay-opacity')} `), opacity, opacityValue);
+        overlayOptions.append(showOriginalLabel, showOnionLabel, opacityLabel);
 
         const list = BB.el({ parent: this.rootEl, className: classes.frameList });
         frameSet.frames.forEach((frame, index) => {
@@ -200,6 +211,14 @@ export class FramesUi {
         this.state = state;
         if (referenceUiState) this.referenceUiState = referenceUiState;
         this.render();
+    }
+
+    updateSelectionAvailability(hasSelection: boolean): void {
+        this.referenceUiState.hasSelection = hasSelection;
+        if (this.copySelectionButton) {
+            this.copySelectionButton.disabled =
+                this.isBusy || !this.referenceUiState.hasReference || !hasSelection;
+        }
     }
 
     updateActiveThumbnail(thumbnail: string): void {

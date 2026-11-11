@@ -1438,6 +1438,7 @@ export class KlApp {
 
         const setBrushColor = (p_color: TRgb) => {
             currentColor = p_color;
+            this.klColorSlider.setColor(p_color);
             currentBrushUi.setColor(p_color);
             brushSettingService.emitColor(p_color);
             this.mobileColorUi.setColor(p_color);
@@ -1509,6 +1510,7 @@ export class KlApp {
             const frame = state?.frameSet.frames[state.activeFrameIndex];
             return {
                 hasReference: !!frame && state?.frameSet.referenceTrack?.[frame.id] !== undefined,
+                hasSelection: !!this.klCanvas.getSelection()?.length,
                 canShowOnion: !!state && state.activeFrameIndex > 0,
                 showOriginal,
                 showOnion: showOnionSkin,
@@ -2180,6 +2182,7 @@ export class KlApp {
         updateFramesUi();
         framesUi.setIsVisible(false);
         this.klHistory.addListener(() => {
+            framesUi?.updateSelectionAvailability(!!this.klCanvas.getSelection()?.length);
             if (!activeFrameState) {
                 if (frameThumbnailRefreshTimeout !== undefined) {
                     clearTimeout(frameThumbnailRefreshTimeout);
