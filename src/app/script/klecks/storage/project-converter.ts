@@ -11,6 +11,8 @@ import { canvasToBlob } from '../../bb/base/canvas';
 import { loadImageFromBlob } from '../../bb/base/load-image';
 import {
     projectFramesToStored,
+    referenceTrackToStored,
+    storedReferenceTrackToProject,
     storedFramesToProject,
     TStoredFrameSet,
 } from './project-frame-converter';
@@ -119,6 +121,7 @@ export class ProjectConverter {
         }
 
         const frames = await projectFramesToStored(project.frames, toFrameBlob);
+        const referenceTrack = await referenceTrackToStored(project.referenceTrack, toFrameBlob);
 
         return {
             id: 1,
@@ -129,7 +132,7 @@ export class ProjectConverter {
             height: project.height,
             layers,
             ...(frames ? { frames } : {}),
-            ...(project.referenceTrack ? { referenceTrack: project.referenceTrack } : {}),
+            ...(referenceTrack ? { referenceTrack } : {}),
             ...(project.palette ? { palette: project.palette } : {}),
         };
     }
@@ -160,6 +163,17 @@ export class ProjectConverter {
             }
             return new Image(storageProject.width, storageProject.height);
         });
+        const referenceTrack = await storedReferenceTrackToProject(
+            storageProject.referenceTrack,
+            async (blob) => {
+                if (blob instanceof Blob) {
+                    return loadImageFromBlob(blob).catch(
+                        () => new Image(storageProject.width, storageProject.height),
+                    );
+                }
+                return new Image(storageProject.width, storageProject.height);
+            },
+        );
         let frames: TKlProject['frames'];
         if (framesWithImages) {
             const { activeFrameIndex, ...frameSet } = framesWithImages;
@@ -201,9 +215,7 @@ export class ProjectConverter {
                 };
             }),
             ...(frames ? { frames } : {}),
-            ...(storageProject.referenceTrack
-                ? { referenceTrack: storageProject.referenceTrack }
-                : {}),
+            ...(referenceTrack ? { referenceTrack } : {}),
             ...(storageProject.palette ? { palette: storageProject.palette } : {}),
         };
 

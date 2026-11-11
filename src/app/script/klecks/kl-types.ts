@@ -110,8 +110,9 @@ export type TKlProject = {
     palette?: TProjectPaletteData;
 };
 
-/** Reserved project metadata containers for later frame-reference and palette slices. */
+/** Reference image handles keyed by stable FrameSet frame id. */
 export type TReferenceTrackData = Record<string, unknown>;
+/** Reserved project metadata slot for the future per-project palette. */
 export type TProjectPaletteData = Record<string, unknown>;
 
 export type TKlEmbedProjectLayer = Omit<

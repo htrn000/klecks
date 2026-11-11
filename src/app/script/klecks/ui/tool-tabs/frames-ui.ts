@@ -10,6 +10,20 @@ export type TFramesUiParams = {
     onMoveLeft: () => void | Promise<void>;
     onMoveRight: () => void | Promise<void>;
     onSelect: (index: number) => void | Promise<void>;
+    onSetReference: () => void | Promise<void>;
+    onToggleOriginal: (show: boolean) => void;
+    onToggleOnion: (show: boolean) => void;
+    onOpacityChange: (opacity: number) => void;
+    onCopyOriginal: () => void | Promise<void>;
+    onCopySelection: () => void | Promise<void>;
+};
+
+export type TFramesReferenceUiState = {
+    hasReference: boolean;
+    canShowOnion: boolean;
+    showOriginal: boolean;
+    showOnion: boolean;
+    opacity: number;
 };
 
 export class FramesUi {
@@ -18,6 +32,13 @@ export class FramesUi {
     private isBusy = false;
     private state: TActiveFrameSet | undefined;
     private activeThumbnailEl: HTMLImageElement | HTMLSpanElement | undefined;
+    private referenceUiState: TFramesReferenceUiState = {
+        hasReference: false,
+        canShowOnion: false,
+        showOriginal: false,
+        showOnion: false,
+        opacity: 0.35,
+    };
 
     private createButton(
         label: string,
@@ -79,6 +100,45 @@ export class FramesUi {
             ),
         );
 
+        actions.append(
+            this.createButton(LANG('frames-set-reference'), this.params.onSetReference),
+            this.createButton(
+                LANG('frames-copy-reference'),
+                this.params.onCopyOriginal,
+                !this.referenceUiState.hasReference,
+            ),
+            this.createButton(
+                LANG('frames-copy-reference-selection'),
+                this.params.onCopySelection,
+                !this.referenceUiState.hasReference,
+            ),
+        );
+
+        const overlayOptions = BB.el({ parent: this.rootEl, className: classes.actions });
+        const showOriginalLabel = document.createElement('label');
+        const showOriginal = document.createElement('input');
+        showOriginal.type = 'checkbox';
+        showOriginal.checked = this.referenceUiState.showOriginal;
+        showOriginal.disabled = this.isBusy || !this.referenceUiState.hasReference;
+        showOriginal.addEventListener('change', () => this.params.onToggleOriginal(showOriginal.checked));
+        showOriginalLabel.append(showOriginal, document.createTextNode(LANG('frames-show-original')));
+        const showOnionLabel = document.createElement('label');
+        const showOnion = document.createElement('input');
+        showOnion.type = 'checkbox';
+        showOnion.checked = this.referenceUiState.showOnion;
+        showOnion.disabled = this.isBusy || !this.referenceUiState.canShowOnion;
+        showOnion.addEventListener('change', () => this.params.onToggleOnion(showOnion.checked));
+        showOnionLabel.append(showOnion, document.createTextNode(LANG('frames-onion-skin')));
+        const opacity = document.createElement('input');
+        opacity.type = 'range';
+        opacity.min = '0';
+        opacity.max = '100';
+        opacity.value = String(Math.round(this.referenceUiState.opacity * 100));
+        opacity.disabled = this.isBusy;
+        opacity.setAttribute('aria-label', LANG('frames-overlay-opacity'));
+        opacity.addEventListener('input', () => this.params.onOpacityChange(Number(opacity.value) / 100));
+        overlayOptions.append(showOriginalLabel, showOnionLabel, opacity);
+
         const list = BB.el({ parent: this.rootEl, className: classes.frameList });
         frameSet.frames.forEach((frame, index) => {
             const button = document.createElement('button');
@@ -136,8 +196,9 @@ export class FramesUi {
         this.render();
     }
 
-    update(state: TActiveFrameSet | undefined): void {
+    update(state: TActiveFrameSet | undefined, referenceUiState?: TFramesReferenceUiState): void {
         this.state = state;
+        if (referenceUiState) this.referenceUiState = referenceUiState;
         this.render();
     }
 

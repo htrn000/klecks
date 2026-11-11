@@ -20,6 +20,7 @@ import { klCanvasToPsdBlob } from '../klecks/storage/kl-canvas-to-psd-blob';
 import { ProjectStore } from '../klecks/storage/project-store';
 import { SaveReminder } from '../klecks/ui/components/save-reminder';
 import { KlCanvas } from '../klecks/canvas/kl-canvas';
+import { drawProject } from '../klecks/canvas/draw-project';
 import { LANG } from '../language/language';
 import { LocalStorage } from '../bb/base/local-storage';
 import { LineSmoothing } from '../klecks/events/line-smoothing';
@@ -371,6 +372,13 @@ export class KlApp {
         const tempHistory = new KlTempHistory();
         let mainTabRow: TabRow | undefined = undefined;
         let activeFrameState: TActiveFrameSet | undefined;
+        let showOriginal = false;
+        let showOnionSkin = false;
+        let overlayOpacity = 0.35;
+        let renderOverlays: { image: CanvasImageSource; opacity: number }[] = [];
+        let onionComposite: { frame: TFrame; canvas: HTMLCanvasElement } | undefined;
+        const referenceImageCache = new Map<string, CanvasImageSource>();
+        let overlayRequestId = 0;
         let frameThumbnailRefreshTimeout: ReturnType<typeof setTimeout> | undefined;
         this.getActiveFrameState = () => activeFrameState;
         let framesUi: FramesUi | undefined;
@@ -822,6 +830,7 @@ export class KlApp {
         this.easelProjectUpdater = new EaselProjectUpdater({
             klCanvas: this.klCanvas,
             easel: this.easel,
+            getRenderOverlays: () => renderOverlays,
         });
         this.klHistory.addListener(() => {
             this.easelProjectUpdater.update();
@@ -1462,6 +1471,154 @@ export class KlApp {
 
         const showFrameLimitError = () => showError(LANG('frames-limit-reached'));
 
+        const getReferenceUiState = () => {
+            const state = activeFrameState;
+            const frame = state?.frameSet.frames[state.activeFrameIndex];
+            return {
+                hasReference: !!frame && state?.frameSet.referenceTrack?.[frame.id] !== undefined,
+                canShowOnion: !!state && state.activeFrameIndex > 0,
+                showOriginal,
+                showOnion: showOnionSkin,
+                opacity: overlayOpacity,
+            };
+        };
+
+        const updateFramesUi = () => {
+            const frameIds = new Set(activeFrameState?.frameSet.frames.map((frame) => frame.id) ?? []);
+            for (const frameId of referenceImageCache.keys()) {
+                if (!frameIds.has(frameId)) referenceImageCache.delete(frameId);
+            }
+            if (
+                onionComposite &&
+                !activeFrameState?.frameSet.frames.includes(onionComposite.frame)
+            ) {
+                BB.freeCanvas(onionComposite.canvas);
+                onionComposite = undefined;
+            }
+            framesUi?.update(activeFrameState, getReferenceUiState());
+        };
+
+        const loadCanvasImage = async (image: unknown): Promise<CanvasImageSource | undefined> => {
+            if (image instanceof Blob) return await loadImageFromBlob(image);
+            if (image instanceof HTMLCanvasElement || image instanceof HTMLImageElement) return image;
+            return undefined;
+        };
+
+        const createFrameComposite = async (frame: TFrame): Promise<HTMLCanvasElement> => {
+            if (onionComposite?.frame === frame) return onionComposite.canvas;
+            const layers = await Promise.all(
+                frame.layers.map(async (layer, index) => ({
+                    name: layer.name ?? LANG('layers-layer') + ' ' + (index + 1),
+                    isVisible: layer.isVisible ?? true,
+                    opacity: layer.opacity ?? 1,
+                    mixModeStr: (layer.mixModeStr ?? 'source-over') as TMixMode,
+                    hasClipping: layer.hasClipping ?? false,
+                    image: await loadCanvasImage(layer.image),
+                })),
+            );
+            if (layers.some((layer) => !layer.image)) {
+                throw new Error('Frame image is unavailable for onion skin');
+            }
+            const canvas = drawProject({
+                projectId: this.klCanvas.getProject().projectId,
+                width: activeFrameState!.frameSet.width,
+                height: activeFrameState!.frameSet.height,
+                layers: layers as TKlProject['layers'],
+            });
+            if (onionComposite) BB.freeCanvas(onionComposite.canvas);
+            onionComposite = { frame, canvas };
+            return canvas;
+        };
+
+        const refreshFrameOverlays = async (): Promise<void> => {
+            const requestId = ++overlayRequestId;
+            const state = activeFrameState;
+            if (!state) {
+                renderOverlays = [];
+                if (onionComposite) {
+                    BB.freeCanvas(onionComposite.canvas);
+                    onionComposite = undefined;
+                }
+                this.easelProjectUpdater.update();
+                updateFramesUi();
+                return;
+            }
+            const frame = state.frameSet.frames[state.activeFrameIndex];
+            if (!frame) return;
+            const overlays: { image: CanvasImageSource; opacity: number }[] = [];
+            try {
+                if (showOnionSkin && state.activeFrameIndex > 0) {
+                    const previousFrame = state.frameSet.frames[state.activeFrameIndex - 1];
+                    overlays.push({ image: await createFrameComposite(previousFrame), opacity: overlayOpacity });
+                }
+                if (showOriginal) {
+                    const source = await getReferenceImage(frame.id);
+                    if (source) overlays.push({ image: source, opacity: overlayOpacity });
+                }
+            } catch (error) {
+                showError(error instanceof Error ? error.message : LANG('frames-reference-unavailable'));
+            }
+            if (requestId !== overlayRequestId || state !== activeFrameState) return;
+            renderOverlays = overlays;
+            this.easelProjectUpdater.update();
+            updateFramesUi();
+        };
+
+        const getReferenceImage = async (frameId: string): Promise<CanvasImageSource | undefined> => {
+            const cached = referenceImageCache.get(frameId);
+            if (cached) return cached;
+            const image = await loadCanvasImage(activeFrameState?.frameSet.referenceTrack?.[frameId]);
+            if (image) referenceImageCache.set(frameId, image);
+            return image;
+        };
+
+        const setCurrentFrameReference = async (): Promise<void> => {
+            if (!activeFrameState) return;
+            const frame = activeFrameState.frameSet.frames[activeFrameState.activeFrameIndex];
+            const composite = this.klCanvas.getCanvas();
+            let image: Blob;
+            try {
+                image = await canvasToBlob(composite, 'image/png');
+            } finally {
+                BB.freeCanvas(composite);
+            }
+            const validation = createFrameSet({
+                ...activeFrameState.frameSet,
+                referenceTrack: {
+                    ...activeFrameState.frameSet.referenceTrack,
+                    [frame.id]: image,
+                },
+            });
+            if (!validation.ok) {
+                showFrameLimitError();
+                return;
+            }
+            activeFrameState = { ...activeFrameState, frameSet: validation.value };
+            referenceImageCache.delete(frame.id);
+            await getReferenceImage(frame.id);
+            showOriginal = true;
+            await refreshFrameOverlays();
+        };
+
+        const copyReferenceToCurrentLayer = async (onlySelection: boolean): Promise<void> => {
+            if (!activeFrameState) return;
+            const frame = activeFrameState.frameSet.frames[activeFrameState.activeFrameIndex];
+            const image = await getReferenceImage(frame.id);
+            if (!image) return;
+            const selection = onlySelection ? this.klCanvas.getSelection() : undefined;
+            this.klCanvas.drawOperation(currentLayerIndex, (ctx) => {
+                ctx.save();
+                try {
+                    if (selection) ctx.clip(new Path2D(getSelectionPath2d(selection)));
+                    ctx.drawImage(image, 0, 0);
+                } finally {
+                    ctx.restore();
+                }
+            });
+            this.layersUi.update();
+            this.easelProjectUpdater.update();
+        };
+
         const createFrameThumbnail = (): string => {
             const thumbnailCanvas = this.klCanvas.getCanvas(
                 64 / Math.max(this.klCanvas.getWidth(), this.klCanvas.getHeight()),
@@ -1614,7 +1771,8 @@ export class KlApp {
                 this.toolspace.style.pointerEvents = previousToolspacePointerEvents;
                 this.easel.setIsFrozen(KL.DIALOG_COUNTER.get() > 0);
                 framesUi?.setBusy(false);
-                framesUi?.update(activeFrameState);
+                updateFramesUi();
+                void refreshFrameOverlays();
             }
         };
 
@@ -1706,7 +1864,7 @@ export class KlApp {
             const result = moveFrame(activeFrameState, activeFrameState.activeFrameIndex, direction);
             if (!result.ok) return;
             activeFrameState = result.value;
-            framesUi?.update(activeFrameState);
+            updateFramesUi();
         };
 
         const selectActiveFrame = async (index: number): Promise<void> => {
@@ -1949,8 +2107,23 @@ export class KlApp {
             onMoveLeft: () => runFrameAction(() => moveActiveFrame(-1)),
             onMoveRight: () => runFrameAction(() => moveActiveFrame(1)),
             onSelect: (index) => runFrameAction(() => selectActiveFrame(index)),
+            onSetReference: () => runFrameAction(setCurrentFrameReference),
+            onToggleOriginal: (show) => {
+                showOriginal = show;
+                void refreshFrameOverlays();
+            },
+            onToggleOnion: (show) => {
+                showOnionSkin = show;
+                void refreshFrameOverlays();
+            },
+            onOpacityChange: (opacity) => {
+                overlayOpacity = opacity;
+                void refreshFrameOverlays();
+            },
+            onCopyOriginal: () => runFrameAction(() => copyReferenceToCurrentLayer(false)),
+            onCopySelection: () => runFrameAction(() => copyReferenceToCurrentLayer(true)),
         });
-        framesUi.update(activeFrameState);
+        updateFramesUi();
         framesUi.setIsVisible(false);
         this.klHistory.addListener(() => {
             if (!activeFrameState) {
@@ -2198,7 +2371,10 @@ export class KlApp {
             }
             if (project.project.frames) {
                 const { activeFrameIndex, ...frameSetData } = project.project.frames;
-                const validated = createFrameSet(frameSetData);
+                const validated = createFrameSet({
+                    ...frameSetData,
+                    referenceTrack: project.project.referenceTrack,
+                });
                 if (
                     !validated.ok ||
                     !Number.isInteger(activeFrameIndex) ||
@@ -2214,24 +2390,25 @@ export class KlApp {
                     frameSet: validated.value,
                     activeFrameIndex,
                 };
-                framesUi?.update(activeFrameState);
+                updateFramesUi();
                 const restoredFrame = await restoreFrame(
                     activeFrameState.frameSet.frames[activeFrameIndex],
                 );
                 if (!restoredFrame) {
                     activeFrameState = undefined;
-                    framesUi?.update(undefined);
+                    updateFramesUi();
                     closeLoader?.();
                     showFailureMessage();
                     return;
                 }
             } else {
                 activeFrameState = undefined;
-                framesUi?.update(undefined);
+                updateFramesUi();
                 this.layersUi.update(layerIndex);
                 setCurrentLayer(layerIndex);
                 this.easelProjectUpdater.update();
             }
+            await refreshFrameOverlays();
             this.easel.resetOrFitTransform(true);
 
             setTimeout(() => {
@@ -2456,7 +2633,7 @@ export class KlApp {
                     title: LANG('tab-frames'),
                     onOpen: () => {
                         framesUi?.setIsVisible(true);
-                        framesUi?.update(activeFrameState);
+                        updateFramesUi();
                     },
                     onClose: () => {
                         framesUi?.setIsVisible(false);
@@ -2749,6 +2926,7 @@ export class KlApp {
         if (!frameState) {
             return project;
         }
+        const { referenceTrack, ...frameSet } = frameState.frameSet;
         const activeFrame = frameState.frameSet.frames[frameState.activeFrameIndex];
         const activeLayers = this.klCanvas.getLayers();
         const thumbnailCanvas = this.klCanvas.getCanvas(
@@ -2776,10 +2954,11 @@ export class KlApp {
         return {
             ...project,
             frames: {
-                ...frameState.frameSet,
+                ...frameSet,
                 frames,
                 activeFrameIndex: frameState.activeFrameIndex,
             },
+            ...(referenceTrack ? { referenceTrack } : {}),
         };
     }
 

@@ -7,6 +7,7 @@ import { throwIfNull } from '../../../bb/base/base';
 export type TEaselProjectUpdaterParams<T extends string> = {
     klCanvas: KlCanvas;
     easel: Easel<T>;
+    getRenderOverlays?: () => { image: CanvasImageSource; opacity: number }[];
 };
 
 /**
@@ -16,12 +17,14 @@ export type TEaselProjectUpdaterParams<T extends string> = {
 export class EaselProjectUpdater<T extends string> {
     private readonly klCanvas: KlCanvas;
     private readonly easel: Easel<T>;
+    private readonly getRenderOverlays: NonNullable<TEaselProjectUpdaterParams<T>['getRenderOverlays']>;
     private compositeCanvas: HTMLCanvasElement | undefined;
 
     // ----------------------------------- public -----------------------------------
     constructor(p: TEaselProjectUpdaterParams<T>) {
         this.klCanvas = p.klCanvas;
         this.easel = p.easel;
+        this.getRenderOverlays = p.getRenderOverlays ?? (() => []);
         this.update();
     }
 
@@ -68,6 +71,7 @@ export class EaselProjectUpdater<T extends string> {
                 };
             }),
             selection: this.klCanvas.getSelection(),
+            renderOverlays: this.getRenderOverlays(),
         });
     }
 

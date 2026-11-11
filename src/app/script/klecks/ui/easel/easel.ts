@@ -341,6 +341,7 @@ export class Easel<GToolId extends string> {
                 width: this.project.width,
                 height: this.project.height,
                 layers: this.project.layers,
+                renderOverlays: this.project.renderOverlays,
             },
             transform: this.getResetTransform(),
             onBeforeRender: p.onBeforeRender,
@@ -718,6 +719,7 @@ export class Easel<GToolId extends string> {
             width: this.project.width,
             height: this.project.height,
             layers: this.project.layers,
+            renderOverlays: this.project.renderOverlays,
         });
         this.selectionRenderer.setSelection(this.project.selection);
         this.selectionIndicatorEl.style.display = this.project.selection ? '' : 'none';

@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectFramesToStored, storedFramesToProject } from './project-frame-converter.ts';
+import {
+    projectFramesToStored,
+    referenceTrackToStored,
+    storedFramesToProject,
+    storedReferenceTrackToProject,
+} from './project-frame-converter.ts';
 
 test('FrameSet project/storage conversion preserves geometry, order, active index, and layer metadata', async () => {
     const projectFrames = {
@@ -14,6 +19,10 @@ test('FrameSet project/storage conversion preserves geometry, order, active inde
             trailingPaddingPx: 28,
             sheetWidth: 1828,
             sheetHeight: 510,
+        },
+        referenceTrack: {
+            idle: 'original-idle',
+            attack: 'original-attack',
         },
         frames: [
             {
@@ -86,4 +95,15 @@ test('old single-frame project shape remains frame-free through conversion', asy
     const restoredFrames = await storedFramesToProject(undefined, (image) => image);
     assert.equal(recordFrames, undefined);
     assert.equal(restoredFrames, undefined);
+});
+
+test('project referenceTrack PNG handles round-trip through the reserved storage slot', async () => {
+    const referenceTrack = { idle: 'original-idle', attack: 'original-attack' };
+    const record = await referenceTrackToStored(referenceTrack, (image) => `png:${image}`);
+    assert.deepEqual(record, {
+        idle: 'png:original-idle',
+        attack: 'png:original-attack',
+    });
+    const restored = await storedReferenceTrackToProject(record, (blob) => blob.replace('png:', ''));
+    assert.deepEqual(restored, referenceTrack);
 });

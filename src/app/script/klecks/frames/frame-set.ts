@@ -39,6 +39,8 @@ export type TFrameSet = {
     height: number;
     frames: TFrame[];
     sheet?: TFrameSheetGeometry;
+    /** Optional read-only original image handles keyed by stable frame id. */
+    referenceTrack?: Record<string, unknown>;
 };
 
 /** Project-level FrameSet payload with the frame selected when the project was last stored. */
@@ -124,7 +126,7 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
     if (!isRecord(input)) {
         return error('invalid-frame-set', 'FrameSet must be an object');
     }
-    const { width, height, frames, sheet } = input;
+    const { width, height, frames, sheet, referenceTrack } = input;
     if (!isPositiveSafeInteger(width) || !isPositiveSafeInteger(height)) {
         return error('invalid-size', 'Frame width and height must be positive safe integers');
     }
@@ -177,6 +179,20 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
         });
     }
 
+    let validatedReferenceTrack: Record<string, unknown> | undefined;
+    if (referenceTrack !== undefined) {
+        if (!isRecord(referenceTrack)) {
+            return error('invalid-frame-set', 'Reference track must be an object keyed by frame id');
+        }
+        validatedReferenceTrack = {};
+        for (const [frameId, image] of Object.entries(referenceTrack)) {
+            if (!frameIds.has(frameId) || image === undefined || image === null) {
+                return error('invalid-frame', 'Reference image must belong to an existing frame', frames.findIndex((frame) => isRecord(frame) && frame.id === frameId));
+            }
+            validatedReferenceTrack[frameId] = image;
+        }
+    }
+
     let validatedSheet: TFrameSheetGeometry | undefined;
     if (sheet !== undefined) {
         if (!isRecord(sheet)) {
@@ -218,6 +234,7 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
             height,
             frames: validatedFrames,
             ...(validatedSheet ? { sheet: validatedSheet } : {}),
+            ...(validatedReferenceTrack ? { referenceTrack: validatedReferenceTrack } : {}),
         },
         memoryBytes,
     };
@@ -244,6 +261,7 @@ function operationResult(
     frames: TFrame[],
     activeFrameIndex: number,
     original: TFrameSet,
+    referenceTrack: Record<string, unknown> | undefined = original.referenceTrack,
 ): TFrameSetOperationResult {
     const sheet = original.sheet
         ? {
@@ -258,6 +276,7 @@ function operationResult(
         height: original.height,
         frames,
         ...(sheet ? { sheet } : {}),
+        ...(referenceTrack ? { referenceTrack } : {}),
     });
     return validation.ok
         ? { ok: true, value: { frameSet: validation.value, activeFrameIndex } }
@@ -294,7 +313,16 @@ export function duplicateFrame(
         id: newFrameId,
         layers: source.layers.map((layer, index) => ({ ...layer, id: newLayerIds[index] })),
     };
-    return addFrame(state, duplicate);
+    const referenceTrack = state.frameSet.referenceTrack
+        ? { ...state.frameSet.referenceTrack }
+        : undefined;
+    if (referenceTrack?.[source.id] !== undefined) {
+        referenceTrack[newFrameId] = referenceTrack[source.id];
+    }
+    const frames = [...state.frameSet.frames];
+    const insertAt = state.activeFrameIndex + 1;
+    frames.splice(insertAt, 0, duplicate);
+    return operationResult(frames, insertAt, state.frameSet, referenceTrack);
 }
 
 /** Delete a frame, refusing to remove the last frame. */
@@ -320,7 +348,14 @@ export function deleteFrame(state: TActiveFrameSet, index: number): TFrameSetOpe
             : index === state.activeFrameIndex
               ? Math.min(index, frames.length - 1)
               : state.activeFrameIndex;
-    return operationResult(frames, activeFrameIndex, state.frameSet);
+    const referenceTrack = state.frameSet.referenceTrack
+        ? Object.fromEntries(
+              Object.entries(state.frameSet.referenceTrack).filter(([frameId]) =>
+                  frames.some((frame) => frame.id === frameId),
+              ),
+          )
+        : undefined;
+    return operationResult(frames, activeFrameIndex, state.frameSet, referenceTrack);
 }
 
 /** Move the requested frame one slot left or right and keep the same active frame selected. */

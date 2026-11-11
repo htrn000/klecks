@@ -31,6 +31,7 @@ export type TProjectViewportProject = {
     width: number;
     height: number;
     layers: TProjectViewportLayer[];
+    renderOverlays?: { image: CanvasImageSource; opacity: number }[];
 };
 
 type TRenderedImage = { image: CanvasImageSource; transform?: Matrix };
@@ -262,6 +263,14 @@ export class ProjectViewport {
                 ctx.drawImage(renderedImage.image, 0, 0);
             },
         );
+
+        for (const overlay of this.project.renderOverlays ?? []) {
+            this.ctx.save();
+            this.ctx.globalAlpha = overlay.opacity;
+            this.ctx.globalCompositeOperation = 'source-over';
+            this.ctx.drawImage(overlay.image, 0, 0, this.project.width, this.project.height);
+            this.ctx.restore();
+        }
 
         this.renderAfter?.(this.ctx, renderedTransform);
 

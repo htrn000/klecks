@@ -179,3 +179,44 @@ test('refuses deletion of the last frame without changing state', () => {
     assert.equal(operation.error.code, 'last-frame');
     assert.deepEqual(state.frameSet.frames.map((frame) => frame.id), ['only']);
 });
+
+test('referenceTrack follows stable frame ids through frame operations', () => {
+    const initial = createFrameSet({
+        width: 10,
+        height: 10,
+        frames: [
+            { id: 'a', layers: [{ id: 'la', image: 'pixels-a' }] },
+            { id: 'b', layers: [{ id: 'lb', image: 'pixels-b' }] },
+        ],
+        referenceTrack: { a: 'original-a', b: 'original-b' },
+    });
+    assert.equal(initial.ok, true);
+    let state = { frameSet: initial.value, activeFrameIndex: 0 };
+
+    let operation = addFrame(state, { id: 'c', layers: [{ id: 'lc', image: 'pixels-c' }] });
+    assert.equal(operation.ok, true);
+    state = operation.value;
+    assert.deepEqual(state.frameSet.referenceTrack, { a: 'original-a', b: 'original-b' });
+
+    operation = selectFrame(state, 0);
+    assert.equal(operation.ok, true);
+    state = operation.value;
+    operation = duplicateFrame(state, 'a-copy', ['la-copy']);
+    assert.equal(operation.ok, true);
+    state = operation.value;
+    assert.equal(state.frameSet.referenceTrack['a-copy'], 'original-a');
+
+    operation = moveFrame(state, 1, 1);
+    assert.equal(operation.ok, true);
+    state = operation.value;
+    assert.deepEqual(state.frameSet.frames.map((frame) => frame.id), ['a', 'c', 'a-copy', 'b']);
+    assert.equal(state.frameSet.referenceTrack.a, 'original-a');
+    assert.equal(state.frameSet.referenceTrack['a-copy'], 'original-a');
+
+    operation = deleteFrame(state, 0);
+    assert.equal(operation.ok, true);
+    state = operation.value;
+    assert.equal(state.frameSet.referenceTrack.a, undefined);
+    assert.equal(state.frameSet.referenceTrack['a-copy'], 'original-a');
+    assert.equal(state.frameSet.referenceTrack.b, 'original-b');
+});

@@ -57,6 +57,13 @@ Renaming a key across multiple language files:
   "frames-right": "Move right",
   "frames-frame": "Frame",
   "frames-limit-reached": "Frame memory limit reached. Delete frames or use a smaller canvas.",
+  "frames-set-reference": "Set current frame as reference",
+  "frames-show-original": "Show original",
+  "frames-onion-skin": "Onion skin",
+  "frames-overlay-opacity": "Overlay opacity",
+  "frames-reference-unavailable": "Reference image could not be loaded.",
+  "frames-copy-reference": "Copy original to current layer",
+  "frames-copy-reference-selection": "Copy original selection to current layer",
 
   "tool-brush": {
     hint: "tool that lets user paint (like in ms paint or photoshop)",
