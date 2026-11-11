@@ -9,6 +9,10 @@ const pickerTypes = {
         description: 'JPEG Image',
         accept: { 'image/jpeg': ['.jpg', '.jpeg'] },
     },
+    'image/gif': {
+        description: 'GIF Image',
+        accept: { 'image/gif': ['.gif'] },
+    },
     'image/vnd.adobe.photoshop': {
         description: 'Adobe Photoshop Document',
         accept: { 'image/vnd.adobe.photoshop': ['.psd'] },

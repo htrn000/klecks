@@ -50,6 +50,8 @@ export type TFileUiParams = {
     onImportRnsPackage: (files: FileList) => void;
     onExportRnsSprite: () => void;
     onExportRnsPackage: () => void;
+    onExportGif: () => void;
+    isFrameSetAvailable: () => boolean;
     onNewImage: () => void;
     onShareImage: (callback: () => void) => void;
     onUpload: () => void;
@@ -64,9 +66,11 @@ export class FileUi {
     // from params
     private exportType: TExportType;
     private readonly applyUncommitted: () => void;
+    private readonly isFrameSetAvailable: () => boolean;
 
     private readonly rootEl: HTMLDivElement;
     private importInput: undefined | HTMLInputElement;
+    private gifExportButton: HTMLButtonElement | undefined;
     private browserStorageUi: undefined | BrowserStorageUi;
     private klRecoveryManager: KlRecoveryManager | undefined;
     private recoveryCountBubble: HTMLElement | undefined;
@@ -88,6 +92,7 @@ export class FileUi {
     constructor(p: TFileUiParams) {
         this.exportType = p.exportType;
         this.applyUncommitted = p.applyUncommitted;
+        this.isFrameSetAvailable = p.isFrameSetAvailable;
 
         this.rootEl = document.createElement('div');
 
@@ -201,6 +206,13 @@ export class FileUi {
                 onClick: () => p.onExportRnsPackage(),
                 css: { width: 'calc(100% - 20px)', margin: '5px 10px 0' },
             });
+            this.gifExportButton = BB.el({
+                tagName: 'button', className: 'kl-button grid-button',
+                textContent: LANG('gif-export-menu'),
+                props: { disabled: !p.isFrameSetAvailable() },
+                onClick: () => p.onExportGif(),
+                css: { width: 'calc(100% - 20px)', margin: '5px 10px 0' },
+            }) as HTMLButtonElement;
             const saveButton = BB.el({
                 tagName: 'button',
                 className: 'kl-button',
@@ -372,7 +384,7 @@ export class FileUi {
                 newButton,
                 importButton,
                 spriteInput, packageZipInput, packageFolderInput,
-                rnsImportButton, rnsZipButton, rnsFolderButton, rnsExportButton, rnsPackageExportButton,
+                rnsImportButton, rnsZipButton, rnsFolderButton, rnsExportButton, rnsPackageExportButton, this.gifExportButton,
                 BB.el({ css: { clear: 'both' } }),
                 saveRow,
                 createSpacer(),
@@ -389,7 +401,9 @@ export class FileUi {
         setTimeout(asyncCreation, 1);
     }
 
-    refresh(): void {}
+    refresh(): void {
+        if (this.gifExportButton) this.gifExportButton.disabled = !this.isFrameSetAvailable();
+    }
 
     getElement(): HTMLElement {
         return this.rootEl;

@@ -99,6 +99,8 @@ import { saveAs } from '../bb/base/save-as';
 import { maxLayersFor } from '../klecks/canvas/layer-limits';
 import { ProjectPaletteUi } from '../klecks/ui/components/project-palette-ui';
 import { extractPaletteFromRgba, normalizePalette, TProjectPaletteData } from '../klecks/palette/palette-model';
+import { selectGifFrameRange, TRgbaFrame } from '../klecks/frames/gif-export';
+import { showGifExportDialog, showGifProgressDialog, TGifExportRequest } from '../klecks/ui/modals/gif-export-dialog';
 
 const toolPaintImg = getIconUrl('tool-paint');
 const toolHandImg = getIconUrl('tool-hand');
@@ -415,6 +417,7 @@ export class KlApp {
         let frameThumbnailRefreshTimeout: ReturnType<typeof setTimeout> | undefined;
         this.getActiveFrameState = () => activeFrameState;
         let framesUi: FramesUi | undefined;
+        let refreshGifExportAvailability: (() => void) | undefined;
         let isFrameActionInProgress = false;
 
         const clearLayer = (showStatus?: boolean, ignoreSelection?: boolean) => {
@@ -1534,6 +1537,7 @@ export class KlApp {
                 onionComposite = undefined;
             }
             framesUi?.update(activeFrameState, getReferenceUiState());
+            refreshGifExportAvailability?.();
         };
 
         const loadCanvasImage = async (image: unknown): Promise<CanvasImageSource | undefined> => {
@@ -2697,6 +2701,68 @@ export class KlApp {
             }
         };
 
+        const exportAnimatedGif = async (request: TGifExportRequest): Promise<void> => {
+            if (!activeFrameState) return;
+            const progress = showGifProgressDialog();
+            let worker: Worker | undefined;
+            try {
+                applyUncommitted();
+                if (!(await updateActiveFrameFromCanvas())) return;
+                const frameSet = activeFrameState.frameSet;
+                const selected = selectGifFrameRange(frameSet.frames, request.from, request.to);
+                const frames: TRgbaFrame[] = [];
+                for (let index = 0; index < selected.length; index++) {
+                    if (progress.isCancelled()) return;
+                    const frame = selected[index];
+                    let pixels = framePixelCache.get(frame.id);
+                    if (!pixels) {
+                        const composite = await createFrameComposite(frame);
+                        pixels = new Uint8Array(
+                            BB.ctx(composite, { willReadFrequently: true })
+                                .getImageData(0, 0, frameSet.width, frameSet.height).data,
+                        );
+                    }
+                    frames.push({ width: frameSet.width, height: frameSet.height, pixels: pixels.slice() });
+                    progress.update((index + 1) / selected.length * 0.15);
+                }
+                if (progress.isCancelled()) return;
+                worker = new Worker(new URL('../klecks/frames/gif-export.worker.ts', import.meta.url), { type: 'module' });
+                const bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+                    worker!.onmessage = (event: MessageEvent) => {
+                        if (event.data.type === 'progress') {
+                            progress.update(0.15 + Number(event.data.progress) * 0.85);
+                        } else if (event.data.type === 'done') {
+                            resolve(event.data.bytes as ArrayBuffer);
+                        } else if (event.data.type === 'error') {
+                            reject(new Error(event.data.message));
+                        }
+                        if (progress.isCancelled()) {
+                            worker?.terminate();
+                            reject(new DOMException('GIF export cancelled', 'AbortError'));
+                        }
+                    };
+                    worker!.onerror = (event) => reject(new Error(event.message || LANG('gif-export-failed')));
+                    worker!.postMessage(
+                        { frames, options: request },
+                        frames.map((frame) => frame.pixels.buffer as ArrayBuffer),
+                    );
+                });
+                progress.close();
+                await saveAs(
+                    `${KL_CONFIG.filenameBase || 'klecks'}.gif`,
+                    'image/gif',
+                    async () => new Blob([bytes], { type: 'image/gif' }),
+                );
+            } catch (error) {
+                if (!(error instanceof DOMException && error.name === 'AbortError')) {
+                    showError(error instanceof Error ? error.message : LANG('gif-export-failed'));
+                }
+            } finally {
+                worker?.terminate();
+                progress.close();
+            }
+        };
+
         const exportRnsPackage = async (): Promise<void> => {
             try {
                 const result = await getCurrentSpritePng();
@@ -2750,6 +2816,11 @@ export class KlApp {
                   onImportRnsPackage: (files) => void importRnsPackageFiles(files),
                   onExportRnsSprite: () => void exportRnsSprite(),
                   onExportRnsPackage: () => void exportRnsPackage(),
+                  onExportGif: () => {
+                      const frameSet = this.getActiveFrameState?.()?.frameSet;
+                      if (frameSet) showGifExportDialog(frameSet.frames.length, (request) => void exportAnimatedGif(request));
+                  },
+                  isFrameSetAvailable: () => !!this.getActiveFrameState?.(),
                   onNewImage: showNewImageDialog,
                   onShareImage: (callback) => {
                       applyUncommitted();
@@ -2774,6 +2845,7 @@ export class KlApp {
                       this.updateLastSaved();
                   },
               });
+        refreshGifExportAvailability = () => fileUi?.refresh();
 
         if (!this.embed && projectStore) {
             this.saveReminder = new SaveReminder({

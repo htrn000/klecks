@@ -8,6 +8,8 @@
     "lib": ["ESNext", "WebWorker"]
   },
   "include": [
-    "../../../../klecks-service-worker.ts"
+    "../../../../klecks-service-worker.ts",
+    "../../klecks/frames/gif-export.worker.ts",
+    "../../klecks/frames/gifenc-types.d.ts"
   ]
 }
