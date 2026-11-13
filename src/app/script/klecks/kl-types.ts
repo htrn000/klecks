@@ -1,7 +1,7 @@
-import { KlCanvas, TKlCanvasLayer } from './canvas/kl-canvas';
-import { TTranslationCode } from '../../languages/languages';
-import { KlHistory } from './history/kl-history';
-import { THistoryEntryDataComposed, THistoryEntryLayerTile } from './history/history.types';
+import type { KlCanvas, TKlCanvasLayer } from './canvas/kl-canvas';
+import type { TTranslationCode } from '../../languages/languages';
+import type { KlHistory } from './history/kl-history';
+import type { THistoryEntryDataComposed, THistoryEntryLayerTile } from './history/history.types';
 import type { TFrameSetPayload } from './frames/frame-set';
 import type { TProjectPaletteData } from './palette/palette-model';
 export type { TProjectPaletteData } from './palette/palette-model';

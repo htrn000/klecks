@@ -1,4 +1,4 @@
-import { TImageDataTile } from './history.types';
+import type { TImageDataTile } from './history.types';
 import { copyImageData } from '../utils/copy-image-data';
 import { randomUuid } from '../../bb/base/base';
 import { HISTORY_TILE_SIZE } from './kl-history';

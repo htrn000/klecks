@@ -72,6 +72,14 @@ import { EASEL_MAX_SCALE, EASEL_MIN_SCALE } from '../klecks/ui/easel/easel.confi
 import { THistoryEntryDataComposed } from '../klecks/history/history.types';
 import { KlHistoryExecutor, THistoryExecutionType } from '../klecks/history/kl-history-executor';
 import { KlHistory } from '../klecks/history/kl-history';
+import { TKlHistoryState } from '../klecks/history/kl-history';
+import {
+    clearCachedFrameHistories,
+    dropCachedFrameHistories,
+    getCachedFrameHistory,
+    MAX_CACHED_FRAME_HISTORIES,
+    setCachedFrameHistory,
+} from '../klecks/frames/frame-history-cache';
 import { isHistoryEntryActiveLayerChange } from '../klecks/history/push-helpers/is-history-entry-active-layer-change';
 import { MobileUi } from '../klecks/ui/mobile/mobile-ui';
 import { MobileToolUi } from '../klecks/ui/mobile/mobile-tool-ui';
@@ -416,6 +424,13 @@ export class KlApp {
         const tempHistory = new KlTempHistory();
         let mainTabRow: TabRow | undefined = undefined;
         let activeFrameState: TActiveFrameSet | undefined;
+        const frameHistoryCache = new Map<string, TKlHistoryState>();
+        const frameHistoryLru: string[] = [];
+        let historyFrameId: string | undefined;
+        const clearFrameHistory = () => {
+            clearCachedFrameHistories(frameHistoryCache, frameHistoryLru);
+            historyFrameId = undefined;
+        };
         let showOriginal = false;
         let showOnionSkin = false;
         let overlayOpacity = 0.35;
@@ -1757,6 +1772,32 @@ export class KlApp {
             if (!activeFrameState) {
                 return false;
             }
+            if (historyFrameId) {
+                // One slot belongs to the currently active stack in KlHistory itself.
+                setCachedFrameHistory(
+                    frameHistoryCache,
+                    frameHistoryLru,
+                    historyFrameId,
+                    this.klHistory.exportState(),
+                    MAX_CACHED_FRAME_HISTORIES - 1,
+                );
+            }
+            const storedHistory = getCachedFrameHistory(frameHistoryCache, frameHistoryLru, frame.id);
+            if (storedHistory) {
+                dropCachedFrameHistories(frameHistoryCache, frameHistoryLru, [frame.id]);
+            }
+            const frameLayerIds = frame.layers.map((layer) => layer.id);
+            const historyLayerIds = storedHistory ? Object.keys(storedHistory.composed.layerMap) : [];
+            const canRestoreHistory = !!storedHistory &&
+                storedHistory.composed.size.width === activeFrameState.frameSet.width &&
+                storedHistory.composed.size.height === activeFrameState.frameSet.height &&
+                historyLayerIds.length === frameLayerIds.length &&
+                frameLayerIds.every((id) => Object.prototype.hasOwnProperty.call(storedHistory.composed.layerMap, id)) &&
+                frameLayerIds.includes(storedHistory.composed.activeLayerId);
+
+            // reset() pushes into the current history branch. Reseeding first detaches the
+            // exported entries array so this reset cannot mutate a cached frame's stack.
+            this.klHistory.reseed();
             const temporaryCanvases: HTMLCanvasElement[] = [];
             try {
                 const layers = await Promise.all(
@@ -1797,11 +1838,18 @@ export class KlApp {
                     showFrameLimitError();
                     return false;
                 }
+                let selectedLayerIndex = layerIndex;
+                if (canRestoreHistory) {
+                    this.klHistory.importState(storedHistory);
+                    selectedLayerIndex = frameLayerIds.indexOf(storedHistory.composed.activeLayerId);
+                } else {
+                    this.klHistory.reseed();
+                }
                 tempHistory.clear();
                 tempHistory.setIsActive(false);
-                this.klHistory.reseed();
-                setCurrentLayer(layerIndex);
-                this.layersUi.update(layerIndex);
+                historyFrameId = frame.id;
+                setCurrentLayer(selectedLayerIndex);
+                this.layersUi.update(selectedLayerIndex);
                 this.easelProjectUpdater.update();
                 this.easelBrush.setLastDrawEvent();
                 return true;
@@ -1893,6 +1941,7 @@ export class KlApp {
                     activeFrameState = { ...state, frameSet: result.value.frameSet };
                     for (const index of result.value.appliedTargetIndexes) {
                         const frame = activeFrameState.frameSet.frames[index];
+                        dropCachedFrameHistories(frameHistoryCache, frameHistoryLru, [frame.id]);
                         framePixelCache.delete(frame.id);
                         const composite = await createFrameComposite(frame, false, true);
                         const factor = 64 / Math.max(activeFrameState.frameSet.width, activeFrameState.frameSet.height);
@@ -1997,11 +2046,14 @@ export class KlApp {
 
         const deleteActiveFrame = async (): Promise<void> => {
             if (!activeFrameState || !(await updateActiveFrameFromCanvas())) return;
+            const deletedFrameId = activeFrameState.frameSet.frames[activeFrameState.activeFrameIndex].id;
             const result = deleteFrame(activeFrameState, activeFrameState.activeFrameIndex);
             if (!result.ok) {
                 showFrameLimitError();
                 return;
             }
+            dropCachedFrameHistories(frameHistoryCache, frameHistoryLru, [deletedFrameId]);
+            historyFrameId = undefined;
             activeFrameState = result.value;
             await restoreFrame(activeFrameState.frameSet.frames[activeFrameState.activeFrameIndex]);
         };
@@ -2386,12 +2438,14 @@ export class KlApp {
                         : this.uiWidth - this.toolWidth,
                 workspaceHeight: this.uiHeight,
                 onConfirm: (width, height, color) => {
+                    clearFrameHistory();
                     this.klCanvas.reset({
                         projectId: randomUuid(),
                         width: width,
                         height: height,
                         color: color.a === 1 ? color : undefined,
                     });
+                    this.klHistory.reseed();
                     activeFrameState = undefined;
                     updateFramesUi();
 
@@ -2459,6 +2513,7 @@ export class KlApp {
 
         const restoreStoredProject = async (project: TDeserializedKlStorageProject): Promise<boolean> => {
             applyUncommitted();
+            clearFrameHistory();
             const layerIndex = this.klCanvas.reset({
                 projectId: project.project.projectId,
                 width: project.project.width,
@@ -2473,6 +2528,7 @@ export class KlApp {
                 }),
             });
             if (layerIndex === false) return false;
+            this.klHistory.reseed();
             if (project.project.frames) {
                 const { activeFrameIndex, ...frameSetData } = project.project.frames;
                 const validated = createFrameSet({ ...frameSetData, referenceTrack: project.project.referenceTrack });
@@ -2594,6 +2650,7 @@ export class KlApp {
                 return;
             }
             applyUncommitted();
+            clearFrameHistory();
             const layerIndex = this.klCanvas.reset({
                 projectId: project.project.projectId,
                 width: project.project.width,
@@ -2619,6 +2676,7 @@ export class KlApp {
                 showFailureMessage();
                 return;
             }
+            this.klHistory.reseed();
             if (project.project.frames) {
                 const { activeFrameIndex, ...frameSetData } = project.project.frames;
                 const validated = createFrameSet({
@@ -2746,6 +2804,7 @@ export class KlApp {
                             return;
                         }
                         applyUncommitted();
+                        clearFrameHistory();
                         activeFrameState = { frameSet: result.value, activeFrameIndex: imported.value.activeFrameIndex };
                         showOriginal = true;
                         showOnionSkin = false;

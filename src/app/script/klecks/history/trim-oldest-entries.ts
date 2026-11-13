@@ -1,4 +1,4 @@
-import { THistoryEntry } from './history.types';
+import type { THistoryEntry } from './history.types';
 import { composeHistoryStateData } from './compose-history-state-data';
 import { estimateBytes } from './estimate-bytes';
 

@@ -1,4 +1,4 @@
-import { THistoryEntry, THistoryEntryData, THistoryEntryDataComposed } from './history.types';
+import type { THistoryEntry, THistoryEntryData, THistoryEntryDataComposed } from './history.types';
 import { composeHistoryStateData } from './compose-history-state-data';
 import { estimateBytes } from './estimate-bytes';
 import { entryCausesChange } from './entry-causes-change';
@@ -16,6 +16,13 @@ The new entry should only be created after freeing up some space in entries.
 export const HISTORY_TILE_SIZE = 256;
 
 export type TKlHistoryListener = () => void;
+
+/** A history snapshot shares tile data; callers must detach the entries array before mutating it. */
+export type TKlHistoryState = {
+    entries: THistoryEntry[];
+    index: number;
+    composed: THistoryEntryDataComposed;
+};
 
 export type TKlHistoryParams = {
     oldest: THistoryEntryDataComposed;
@@ -185,6 +192,33 @@ export class KlHistory {
             },
         ];
         this.index = 0;
+        this.broadcast();
+    }
+
+    /** Export history without copying its potentially large tile payloads. */
+    exportState(): TKlHistoryState {
+        return {
+            entries: this.entries,
+            index: this.index,
+            composed: this.composed,
+        };
+    }
+
+    /** Restore a previously exported history branch while keeping changeCount monotonic. */
+    importState(state: TKlHistoryState): void {
+        if (
+            !state ||
+            !Array.isArray(state.entries) ||
+            state.entries.length === 0 ||
+            !Number.isInteger(state.index) ||
+            state.index < 0 ||
+            state.index >= state.entries.length
+        ) {
+            throw new Error('Invalid KlHistory state');
+        }
+        this.entries = state.entries;
+        this.index = state.index;
+        this.composed = state.composed;
         this.broadcast();
     }
 

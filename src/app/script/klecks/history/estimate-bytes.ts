@@ -1,4 +1,4 @@
-import { THistoryEntryData } from './history.types';
+import type { THistoryEntryData } from './history.types';
 import { isLayerFill } from '../kl-types';
 
 export function getImageDataBytes(imageData: ImageData): number {

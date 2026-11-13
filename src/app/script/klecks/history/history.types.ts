@@ -1,5 +1,5 @@
-import { MultiPolygon } from 'polygon-clipping';
-import { TLayerFill, TMixMode } from '../kl-types';
+import type { MultiPolygon } from 'polygon-clipping';
+import type { TLayerFill, TMixMode } from '../kl-types';
 
 export type TLayerId = string;
 export type TImageDataTile = {

@@ -1,4 +1,4 @@
-import { THistoryEntryData, THistoryEntryDataComposed } from './history.types';
+import type { THistoryEntryData, THistoryEntryDataComposed } from './history.types';
 
 // checks if `entry` would change `composed`
 export function entryCausesChange(

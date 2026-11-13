@@ -1,8 +1,15 @@
 import { isLayerFill } from '../kl-types';
-import { THistoryEntryData } from './history.types';
+import type { THistoryEntryData } from './history.types';
 import { HISTORY_TILE_SIZE } from './kl-history';
 import { getTileSizeFromIndex } from './image-data-tile';
-import { asyncThrow } from '../../bb/base/base';
+
+const asyncThrow = (error: unknown): void => {
+    if (typeof globalThis.reportError === 'function') {
+        globalThis.reportError(error);
+    } else {
+        setTimeout(() => { throw error; });
+    }
+};
 
 // creates some visibility for problems with history entries.
 export function validateHistoryEntry(
