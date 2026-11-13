@@ -1,6 +1,7 @@
 import { randomUuid } from '../../../bb/base/base';
 import { BB } from '../../../bb/bb';
 import { LANG } from '../../../language/language';
+import { getIconSvg } from '../../../icon/icon';
 import {
     createNewServerProjectId,
     getServerSaveDecision,
@@ -44,7 +45,7 @@ export class ServerProjectsUi {
         if (!(await this.store.isAvailable())) return;
         this.root.style.display = '';
         this.root.append(BB.el({ tagName: 'h3', textContent: LANG('server-projects-title') }));
-        this.currentEl = BB.el({ css: { margin: '0 0 8px' } });
+        this.currentEl = BB.el({ css: { margin: '0 0 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } });
         const save = BB.el({
             tagName: 'button', className: 'kl-button', textContent: LANG('server-projects-save'),
             css: { width: '100%' }, onClick: () => void this.save(),
@@ -80,6 +81,7 @@ export class ServerProjectsUi {
         this.currentEl.textContent = decision.action === 'update'
             ? `${LANG('server-projects-current')}: ${decision.project.name}`
             : LANG('server-projects-not-saved');
+        this.currentEl.title = this.currentEl.textContent;
         for (const row of this.listEl.children) {
             const projectId = (row as HTMLElement).dataset.projectId;
             const isCurrent = projectId === currentId;
@@ -89,27 +91,117 @@ export class ServerProjectsUi {
     }
 
     private createProjectRow(project: TRemoteProjectMeta): HTMLElement {
+        const date = new Date(project.updatedAt).toLocaleString(undefined, {
+            dateStyle: 'short',
+            timeStyle: 'short',
+        });
         const open = BB.el({
-            tagName: 'button', className: 'kl-button',
-            textContent: `${project.name} · ${new Date(project.updatedAt).toLocaleString()}`,
-            css: { flex: '1', textAlign: 'left', minWidth: 0 },
+            tagName: 'button',
+            props: {
+                type: 'button',
+                title: `${project.name} · ${date}`,
+                'aria-label': `${LANG('server-projects-open')}: ${project.name}`,
+            },
+            css: {
+                display: 'flex',
+                flex: '1 1 auto',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                minWidth: 0,
+                textAlign: 'left',
+                cursor: 'pointer',
+                background: 'none',
+                border: 'none',
+                padding: 0,
+            },
+            content: [
+                BB.el({
+                    textContent: project.name,
+                    css: {
+                        width: '100%',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                    },
+                }),
+                BB.el({
+                    textContent: date,
+                    css: {
+                        width: '100%',
+                        fontSize: 11,
+                        opacity: 0.65,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                    },
+                }),
+            ],
             onClick: () => void this.open(project.id),
         });
         const image = BB.el({
             tagName: 'img', props: { src: this.store.thumbnailUrl(project.id), alt: '' },
-            css: { width: 48, height: 48, objectFit: 'contain' },
+            css: {
+                width: 48,
+                height: 48,
+                objectFit: 'contain',
+                flex: 'none',
+                border: '1px solid rgba(0,0,0,0.15)',
+                borderRadius: 3,
+            },
         });
         const rename = BB.el({
-            tagName: 'button', className: 'kl-button', textContent: LANG('server-projects-rename'),
+            tagName: 'button',
+            className: 'kl-button',
+            props: { type: 'button', title: LANG('server-projects-rename'), 'aria-label': LANG('server-projects-rename') },
+            css: {
+                width: 28,
+                height: 28,
+                minWidth: 28,
+                flex: 'none',
+                padding: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'inherit',
+            },
+            content: getIconSvg('rename-layer', { width: 18, height: 18 }),
             onClick: () => void this.rename(project),
         });
         const remove = BB.el({
-            tagName: 'button', className: 'kl-button', textContent: LANG('server-projects-delete'),
+            tagName: 'button',
+            className: 'kl-button',
+            props: { type: 'button', title: LANG('server-projects-delete'), 'aria-label': LANG('server-projects-delete') },
+            css: {
+                width: 28,
+                height: 28,
+                minWidth: 28,
+                flex: 'none',
+                padding: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#b00020',
+            },
+            content: getIconSvg('delete', { width: 18, height: 18 }),
             onClick: () => void this.remove(project),
         });
+        remove.addEventListener('mouseenter', () => { remove.style.background = 'rgba(176,0,32,0.12)'; });
+        remove.addEventListener('mouseleave', () => { remove.style.background = ''; });
         const row = BB.el({
             content: [image, open, rename, remove],
-            css: { display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, padding: 3 },
+            css: {
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                height: 56,
+                padding: 4,
+                borderRadius: 4,
+                marginTop: 4,
+                boxSizing: 'border-box',
+                overflow: 'hidden',
+            },
         });
         (row as HTMLElement).dataset.projectId = project.id;
         return row;

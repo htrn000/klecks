@@ -31,7 +31,6 @@ import { KlColorSlider } from '../klecks/ui/components/kl-color-slider';
 import { ToolspaceToolRow } from '../klecks/ui/components/toolspace-tool-row';
 import { StatusOverlay } from '../klecks/ui/components/status-overlay';
 import { SaveToComputer } from '../klecks/storage/save-to-computer';
-import { ToolspaceScroller } from '../klecks/ui/components/toolspace-scroller';
 import { translateSmoothing } from '../klecks/utils/translate-smoothing';
 import { KlAppImportHandler } from './kl-app-import-handler';
 import { LayersUi } from '../klecks/ui/tool-tabs/layers-ui/layers-ui';
@@ -227,11 +226,10 @@ export class KlApp {
     private readonly mobileColorUi: MobileColorUi;
     private readonly toolspace: HTMLElement;
     private readonly toolspaceInner: HTMLElement;
-    private readonly toolWidth: number = 271;
+    private readonly toolWidth: number = 281;
     private readonly toolspaceTopRow: ToolspaceTopRow | EmbedToolspaceTopRow;
     private readonly bottomBar: HTMLElement | undefined;
     private readonly layersUi: LayersUi;
-    private readonly toolspaceScroller: ToolspaceScroller;
     private readonly bottomBarWrapper: HTMLElement;
     private readonly saveReminder: SaveReminder | undefined;
     private readonly unloadWarningTrigger: UnloadWarningTrigger | undefined;
@@ -252,7 +250,7 @@ export class KlApp {
             if (this.mobileUi.getToolspaceIsOpen()) {
                 if (this.uiLayout === 'left') {
                     css(this.easel.getElement(), {
-                        left: 271,
+                        left: 281,
                     });
                 } else {
                     css(this.easel.getElement(), {
@@ -280,7 +278,7 @@ export class KlApp {
             this.mobileUi.setIsVisible(false);
             if (this.uiLayout === 'left') {
                 css(this.easel.getElement(), {
-                    left: 271,
+                    left: 281,
                 });
             }
             this.toolspace.style.display = 'block';
@@ -298,7 +296,7 @@ export class KlApp {
                 right: '',
             });
             css(this.easel.getElement(), {
-                left: 271,
+                left: 281,
             });
         } else {
             css(this.toolspace, {
@@ -312,7 +310,6 @@ export class KlApp {
         this.statusOverlay.setUiState(this.uiLayout);
         this.floatingLayerPreview.setUiState(this.uiLayout);
         this.updateCollapse();
-        this.toolspaceScroller.updateUiState(this.uiLayout);
     }
 
     // ----------------------------------- public -----------------------------------
@@ -1205,9 +1202,12 @@ export class KlApp {
                 top: 0,
                 bottom: 0,
                 width: this.toolWidth,
-                overflow: 'hidden',
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                overscrollBehavior: 'contain',
+                scrollbarGutter: 'stable',
                 userSelect: 'none',
-                touchAction: 'none',
+                touchAction: 'pan-y',
             },
         });
         this.toolspaceInner = BB.el({
@@ -3215,11 +3215,6 @@ export class KlApp {
             }),
             this.bottomBarWrapper ? this.bottomBarWrapper : undefined,
         ]);
-
-        this.toolspaceScroller = new KL.ToolspaceScroller({
-            toolspace: this.toolspace,
-            uiState: this.uiLayout,
-        });
 
         if (!this.embed) {
             Object.defineProperty(window, 'KL', {

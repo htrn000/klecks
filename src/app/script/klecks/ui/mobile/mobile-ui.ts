@@ -46,7 +46,7 @@ export class MobileUi {
         this.rootEl.style.display = 'block';
         const isLeft = this.orientation === 'left';
         // when toolspace is open, collapse button sits next to it
-        const columnOffset = this.toolspaceIsOpen ? 271 : 0;
+        const columnOffset = this.toolspaceIsOpen ? 281 : 0;
         css(this.columnEl, {
             display: 'flex',
             left: isLeft ? columnOffset : '',

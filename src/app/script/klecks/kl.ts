@@ -56,7 +56,6 @@ import { SaveToComputer } from './storage/save-to-computer';
 import { BrushSettingService } from './brushes-ui/brush-setting-service';
 import { BoxToggle } from './ui/components/box-toggle';
 import { SettingsUi } from './ui/tool-tabs/settings-ui';
-import { ToolspaceScroller } from './ui/components/toolspace-scroller';
 import { GradientUi } from './ui/tool-tabs/gradient-ui';
 import { drawGradient, GradientTool } from './image-operations/gradient-tool';
 
@@ -121,7 +120,6 @@ export const KL = {
     ToolspaceCollapser,
     BrowserStorageUi,
     SaveReminder,
-    ToolspaceScroller,
 
     // --- ui - modals ---
     DIALOG_COUNTER,
