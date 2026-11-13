@@ -112,6 +112,7 @@ const toolShapeImg = getIconUrl('tool-shape');
 const toolSelectImg = getIconUrl('tool-select');
 const tabSettingsImg = getIconUrl('tab-settings');
 const tabLayersImg = getIconUrl('tab-layers');
+const tabFramesImg = getIconUrl('tab-frames');
 const tabEditImg = getIconUrl('tab-edit');
 importFilters();
 
@@ -448,6 +449,7 @@ export class KlApp {
         };
 
         let currentColor = new BB.RGB(0, 0, 0);
+        let paletteUi: ProjectPaletteUi | undefined;
         let currentBrushUi: TBrushUiInstance<any>;
         let currentBrushId: TBrushId;
         let lastNonEraserBrushId: TBrushId;
@@ -478,6 +480,7 @@ export class KlApp {
                 currentBrushUi.setColor(color);
                 this.mobileColorUi.setColor(color);
                 currentColor = BB.copyObj(color);
+                paletteUi?.setCurrentPrimaryColor(currentColor);
             },
             onSetSize: (size) => {
                 currentBrushUi.setSize(size);
@@ -1453,6 +1456,7 @@ export class KlApp {
 
         const setBrushColor = (p_color: TRgb) => {
             currentColor = p_color;
+            paletteUi?.setCurrentPrimaryColor(p_color);
             this.klColorSlider.setColor(p_color);
             currentBrushUi.setColor(p_color);
             brushSettingService.emitColor(p_color);
@@ -1942,7 +1946,7 @@ export class KlApp {
                 alignItems: 'flex-end',
             },
         });
-        const paletteUi = new ProjectPaletteUi({
+        paletteUi = new ProjectPaletteUi({
             onChange: (palette) => { this.projectPalette = palette; },
             onSetPrimary: (color) => setBrushColor(new BB.RGB(color.r, color.g, color.b)),
             getPrimary: () => ({ r: currentColor.r, g: currentColor.g, b: currentColor.b }),
@@ -1957,6 +1961,7 @@ export class KlApp {
             },
         });
         paletteUi.setPalette(this.projectPalette);
+        paletteUi.setCurrentPrimaryColor(currentColor);
         const toolspaceStabilizerRow = new KL.ToolspaceStabilizerRow({
             smoothing: 1,
             onSelect: (v) => {
@@ -1966,10 +1971,10 @@ export class KlApp {
 
         brushDiv.append(colorDiv);
         BB.append(colorDiv, [
+            paletteUi.getElement(),
             this.klColorSlider.getElement(),
             this.klColorSlider.getOutputElement(),
             toolspaceStabilizerRow.getElement(),
-            paletteUi.getElement(),
         ]);
 
         const brushTabRow = new KL.TabRow({
@@ -3102,7 +3107,7 @@ export class KlApp {
                 },
                 {
                     id: 'frames',
-                    label: LANG('tab-frames'),
+                    image: tabFramesImg,
                     title: LANG('tab-frames'),
                     onOpen: () => {
                         framesUi?.setIsVisible(true);
@@ -3112,7 +3117,7 @@ export class KlApp {
                         framesUi?.setIsVisible(false);
                     },
                     css: {
-                        padding: '0 7px',
+                        minWidth: 45,
                     },
                 },
                 {
