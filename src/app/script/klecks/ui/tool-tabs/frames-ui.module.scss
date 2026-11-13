@@ -104,19 +104,3 @@
     opacity: .45;
     pointer-events: none;
 }
-
-.opacityRow {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.opacitySlider {
-    width: 140px;
-    margin: 0;
-}
-
-.opacityValue {
-    color: #555;
-    font-size: 12px;
-}

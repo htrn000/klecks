@@ -2,6 +2,7 @@ import { BB } from '../../../bb/bb';
 import { LANG } from '../../../language/language';
 import { getIconSvg } from '../../../icon/icon';
 import { BoxToggle } from '../components/box-toggle';
+import { KlSlider } from '../components/kl-slider';
 import { TActiveFrameSet } from '../../frames/frame-set';
 import { IconName } from '../../../../icons/icons';
 import * as classes from './frames-ui.module.scss';
@@ -36,6 +37,7 @@ export class FramesUi {
     private isBusy = false;
     private state: TActiveFrameSet | undefined;
     private activeThumbnailEl: HTMLImageElement | HTMLSpanElement | undefined;
+    private opacitySlider: KlSlider | undefined;
     private referenceUiState: TFramesReferenceUiState = {
         hasReference: false,
         canShowOnion: false,
@@ -96,6 +98,30 @@ export class FramesUi {
         const divider = BB.el({ className: classes.divider });
         divider.setAttribute('aria-hidden', 'true');
         return divider;
+    }
+
+    private getOpacitySlider(): KlSlider {
+        if (!this.opacitySlider) {
+            const panelWidth = this.rootEl.clientWidth || 250;
+            this.opacitySlider = new KlSlider({
+                label: LANG('frames-overlay-opacity'),
+                width: Math.min(250, panelWidth),
+                height: 30,
+                min: 0,
+                max: 1,
+                value: this.referenceUiState.opacity,
+                displayScale: 100,
+                onChange: (value) => this.params.onOpacityChange(value),
+            });
+            this.opacitySlider.getElement().style.marginTop = '2px';
+            this.opacitySlider.getElement().style.marginBottom = '6px';
+            this.opacitySlider.getElement().title = LANG('frames-overlay-opacity');
+        }
+        const sliderElement = this.opacitySlider.getElement();
+        const isDragging = !!sliderElement.querySelector('.slider-wrapper--active');
+        if (!isDragging) this.opacitySlider.setValue(this.referenceUiState.opacity);
+        this.opacitySlider.setIsEnabled(!this.isBusy);
+        return this.opacitySlider;
     }
 
     private render(): void {
@@ -190,22 +216,7 @@ export class FramesUi {
         );
 
         if (this.referenceUiState.showOriginal || this.referenceUiState.showOnion) {
-            const opacityRow = BB.el({ parent: this.rootEl, className: classes.opacityRow });
-            const opacity = document.createElement('input');
-            opacity.type = 'range';
-            opacity.min = '0';
-            opacity.max = '100';
-            opacity.value = String(Math.round(this.referenceUiState.opacity * 100));
-            opacity.title = LANG('frames-overlay-opacity');
-            opacity.setAttribute('aria-label', LANG('frames-overlay-opacity'));
-            opacity.disabled = this.isBusy;
-            opacity.className = classes.opacitySlider;
-            const value = BB.el({ tagName: 'span', content: `${opacity.value}%`, className: classes.opacityValue });
-            opacity.addEventListener('input', () => {
-                value.textContent = `${opacity.value}%`;
-                this.params.onOpacityChange(Number(opacity.value) / 100);
-            });
-            opacityRow.append(opacity, value);
+            this.rootEl.append(this.getOpacitySlider().getElement());
         }
     }
 
