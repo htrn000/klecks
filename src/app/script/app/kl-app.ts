@@ -94,6 +94,7 @@ import { setupUnfocusOnClickService } from '../klecks/ui/onfocus-on-click-servic
 import { FloatingLayerPreview } from '../klecks/ui/components/floating-layer-preview';
 import { showRnsSpriteGeometryDialog } from '../klecks/ui/modals/rns-sprite-geometry-dialog';
 import { assembleRnsSpriteSheet, detectRnsSpriteGeometry, encodeRgbaPng, sliceRgbaSpriteSheet, scaleRgbaNearest } from '../klecks/frames/rns-sprite-sheet';
+import { buildRnsImportedFrameSet } from '../klecks/frames/rns-frame-import';
 import { applyRnsPackageEdits, listRnsAnimations, normalizeRnsFolderPath, readZipFile, rnsPackageNameFromPath, writeStoredZip, type TRnsPackageFiles } from '../klecks/frames/rns-package';
 import { saveAs } from '../bb/base/save-as';
 import { maxLayersFor } from '../klecks/canvas/layer-limits';
@@ -2586,49 +2587,45 @@ export class KlApp {
                         const raw = new Uint8Array(pixels);
                         const split = sliceRgbaSpriteSheet(raw, geometry);
                         geometry.trailingPixels = split.trailingPixels;
-                        const frames: TFrame[] = [];
-                        const referenceTrack: Record<string, unknown> = {};
-                        for (let index = 0; index < split.frames.length; index++) {
-                            const framePixels = new Uint8ClampedArray(split.frames[index]);
-                            const celCanvas = BB.canvas(geometry.cellWidth, geometry.cellHeight);
-                            BB.ctx(celCanvas).putImageData(
-                                new ImageData(framePixels, geometry.cellWidth, geometry.cellHeight),
-                                0,
-                                0,
+                        const imported = buildRnsImportedFrameSet(split.frames, geometry, {
+                            originalLayerName: LANG('frames-original-layer'),
+                            editableLayerName: LANG('layers-layer') + ' 2',
+                            makeId: randomUuid,
+                            createImage: (pixels) => {
+                                const canvas = BB.canvas(geometry.cellWidth, geometry.cellHeight);
+                                BB.ctx(canvas).putImageData(
+                                    new ImageData(new Uint8ClampedArray(pixels), geometry.cellWidth, geometry.cellHeight),
+                                    0,
+                                    0,
+                                );
+                                return canvas;
+                            },
+                            createBlankImage: () => BB.canvas(geometry.cellWidth, geometry.cellHeight),
+                        });
+                        if (!imported.ok) {
+                            showError(imported.error.message);
+                            return;
+                        }
+                        const frames = imported.value.frameSet.frames;
+                        for (let index = 0; index < frames.length; index++) {
+                            const frame = frames[index];
+                            const originalCanvas = frame.layers[0].image as HTMLCanvasElement;
+                            // The two-layer form's visible composite is initially transparent.
+                            // Cache that composite for lossless frame assembly; the original cell
+                            // remains available from the hidden layer and reference track.
+                            framePixelCache.set(
+                                frame.id,
+                                imported.value.usedSingleLayerFallback
+                                    ? split.frames[index].slice()
+                                    : new Uint8Array(geometry.cellWidth * geometry.cellHeight * 4),
                             );
-                            const referenceCanvas = BB.canvas(geometry.cellWidth, geometry.cellHeight);
-                            BB.ctx(referenceCanvas).putImageData(
-                                new ImageData(new Uint8ClampedArray(split.frames[index]), geometry.cellWidth, geometry.cellHeight),
-                                0,
-                                0,
-                            );
-                            const id = randomUuid();
-                            framePixelCache.set(id, split.frames[index].slice());
-                            referenceTrack[id] = referenceCanvas;
                             const thumbnailCanvas = BB.canvas(64, 64);
-                            BB.ctx(thumbnailCanvas).drawImage(celCanvas, 0, 0, 64, 64);
-                            const thumbnail = thumbnailCanvas.toDataURL('image/png');
+                            BB.ctx(thumbnailCanvas).drawImage(originalCanvas, 0, 0, 64, 64);
+                            frame.thumbnail = thumbnailCanvas.toDataURL('image/png');
                             BB.freeCanvas(thumbnailCanvas);
-                            frames.push({
-                                id,
-                                layers: [{
-                                    id: randomUuid(),
-                                    name: LANG('layers-layer') + ' 1',
-                                    isVisible: true,
-                                    opacity: 1,
-                                    mixModeStr: 'source-over',
-                                    hasClipping: false,
-                                    image: celCanvas,
-                                }],
-                                thumbnail,
-                            });
                         }
                         const frameSetInput = {
-                            width: geometry.cellWidth,
-                            height: geometry.cellHeight,
-                            frames,
-                            sheet: geometry,
-                            referenceTrack,
+                            ...imported.value.frameSet,
                             ...(packageData ? { rnsPackage: packageData } : {}),
                         };
                         const result = createFrameSet(frameSetInput);
@@ -2637,15 +2634,20 @@ export class KlApp {
                             return;
                         }
                         applyUncommitted();
-                        activeFrameState = { frameSet: result.value, activeFrameIndex: 0 };
+                        activeFrameState = { frameSet: result.value, activeFrameIndex: imported.value.activeFrameIndex };
                         showOriginal = true;
-                        if (!(await restoreFrame(frames[0]))) {
+                        showOnionSkin = false;
+                        overlayOpacity = 0.35;
+                        if (!(await restoreFrame(frames[imported.value.activeFrameIndex]))) {
                             activeFrameState = undefined;
                             showError(LANG('rns-import-failed'));
                             return;
                         }
                         updateFramesUi();
                         await refreshFrameOverlays();
+                        if (imported.value.usedSingleLayerFallback) {
+                            this.statusOverlay.out(LANG('rns-layer-memory-fallback'), true);
+                        }
                         this.easel.resetOrFitTransform(true);
                     } catch (error) {
                         showError(error instanceof Error ? error.message : LANG('rns-import-failed'));
