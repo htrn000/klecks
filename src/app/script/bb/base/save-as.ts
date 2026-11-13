@@ -21,6 +21,10 @@ const pickerTypes = {
         description: 'ZIP Archive',
         accept: { 'application/zip': ['.zip'] },
     },
+    'application/x-klecks+json': {
+        description: 'Klecks project',
+        accept: { 'application/x-klecks+json': ['.klecks'] },
+    },
     'text/plain': {
         description: 'Palette Text',
         accept: { 'text/plain': ['.gpl', '.hex'] },

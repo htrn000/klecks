@@ -90,6 +90,11 @@ export class ServerProjectsUi {
         }
     }
 
+    getCurrentProjectName(): string | undefined {
+        const currentId = this.getProject().projectId;
+        return this.projects.find((project) => project.id === currentId)?.name;
+    }
+
     private createProjectRow(project: TRemoteProjectMeta): HTMLElement {
         const date = new Date(project.updatedAt).toLocaleString(undefined, {
             dateStyle: 'short',

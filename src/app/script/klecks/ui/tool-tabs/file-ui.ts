@@ -51,6 +51,8 @@ export type TFileUiParams = {
     onSaveImageToComputer: () => void;
     onImportRnsSprite: (file: File) => void;
     onImportRnsPackage: (files: FileList) => void;
+    onExportProjectFile: (serverName?: string) => void;
+    onImportProjectFile: (file: File) => void;
     onExportRnsSprite: () => void;
     onExportRnsPackage: () => void;
     onExportGif: () => void;
@@ -188,6 +190,27 @@ export class FileUi {
                 textContent: LANG('rns-import-sprite'),
                 onClick: () => spriteInput.click(),
                 css: { width: 'calc(100% - 20px)', margin: '10px 10px 0' },
+            });
+            const projectFileInput = document.createElement('input');
+            projectFileInput.type = 'file';
+            projectFileInput.accept = '.klecks,application/json';
+            projectFileInput.style.display = 'none';
+            projectFileInput.onchange = () => {
+                const file = projectFileInput.files?.[0];
+                if (file) p.onImportProjectFile(file);
+                projectFileInput.value = '';
+            };
+            const exportProjectButton = BB.el({
+                tagName: 'button', className: 'kl-button grid-button',
+                textContent: LANG('project-file-export'),
+                onClick: () => p.onExportProjectFile(this.serverProjectsUi?.getCurrentProjectName()),
+                css: { width: 'calc(100% - 20px)', margin: '10px 10px 0' },
+            });
+            const importProjectButton = BB.el({
+                tagName: 'button', className: 'kl-button grid-button',
+                textContent: LANG('project-file-import'),
+                onClick: () => projectFileInput.click(),
+                css: { width: 'calc(100% - 20px)', margin: '5px 10px 0' },
             });
             const rnsZipButton = BB.el({
                 tagName: 'button', className: 'kl-button grid-button',
@@ -398,7 +421,8 @@ export class FileUi {
                 saveNote,
                 newButton,
                 importButton,
-                spriteInput, packageZipInput, packageFolderInput,
+                spriteInput, packageZipInput, packageFolderInput, projectFileInput,
+                exportProjectButton, importProjectButton,
                 rnsImportButton, rnsZipButton, rnsFolderButton, rnsExportButton, rnsPackageExportButton, this.gifExportButton,
                 BB.el({ css: { clear: 'both' } }),
                 saveRow,
@@ -423,6 +447,10 @@ export class FileUi {
 
     refreshServerProjectBinding(): void {
         this.serverProjectsUi?.refreshCurrentBinding();
+    }
+
+    getCurrentServerProjectName(): string | undefined {
+        return this.serverProjectsUi?.getCurrentProjectName();
     }
 
     getElement(): HTMLElement {

@@ -112,6 +112,9 @@ import { selectGifFrameRange, TRgbaFrame } from '../klecks/frames/gif-export';
 import { showGifExportDialog, showGifProgressDialog, TGifExportRequest } from '../klecks/ui/modals/gif-export-dialog';
 import { showCopyFrameLayersDialog } from '../klecks/ui/modals/copy-frame-layers-dialog';
 import { RemoteProjectStore } from '../klecks/storage/remote-project-store';
+import { decodeRemoteRecord } from '../klecks/storage/remote-project-store';
+import { ProjectConverter } from '../klecks/storage/project-converter';
+import { encodeProjectFile, KLECKS_PROJECT_FILE_MIME, parseProjectFile } from '../klecks/storage/project-file';
 import type { EditUi } from '../klecks/ui/tool-tabs/edit-ui';
 
 const toolPaintImg = getIconUrl('tool-paint');
@@ -2537,6 +2540,10 @@ export class KlApp {
                     return false;
                 }
                 activeFrameState = { frameSet: validated.value, activeFrameIndex };
+                if (validated.value.baseLayer) {
+                    showOriginal = validated.value.baseLayer.visible;
+                    overlayOpacity = validated.value.baseLayer.opacity;
+                }
                 updateFramesUi();
                 if (!(await restoreFrame(activeFrameState.frameSet.frames[activeFrameIndex]))) {
                     activeFrameState = undefined;
@@ -2555,6 +2562,49 @@ export class KlApp {
             await refreshFrameOverlays();
             this.easel.resetOrFitTransform(true);
             return true;
+        };
+
+        const exportProjectFile = async (serverName?: string): Promise<void> => {
+            try {
+                applyUncommitted();
+                const project = await ProjectConverter.createStorageProject(this.getProject());
+                const name = serverName || `${getFilenameDate()}${KL_CONFIG.filenameBase}`;
+                const fileName = `${name.replace(/[\\/:*?"<>|]/g, '-')}.klecks`;
+                const text = await encodeProjectFile(project, name, Date.now());
+                const result = await saveAs(
+                    fileName,
+                    KLECKS_PROJECT_FILE_MIME,
+                    async () => new Blob([text], { type: KLECKS_PROJECT_FILE_MIME }),
+                );
+                if (result === 'error') showError(LANG('project-file-export-failed'));
+            } catch (error) {
+                showError(error instanceof Error ? error.message : LANG('project-file-export-failed'));
+            }
+        };
+
+        const importProjectFile = async (file: File): Promise<void> => {
+            const hasUnsavedChanges = serverProjectDirty ||
+                this.klHistory.getChangeCount() !== serverProjectCleanChangeCount;
+            if (hasUnsavedChanges && !window.confirm(LANG('server-projects-open-unsaved-confirm'))) return;
+
+            let closeLoader: (() => void) | undefined;
+            showModal({
+                message: LANG('loading'),
+                callback: () => { closeLoader = undefined; },
+                closeFunc: (close) => { closeLoader = close; },
+            });
+            try {
+                const parsed = parseProjectFile(await file.text());
+                const storageProject = decodeRemoteRecord(parsed.project, parsed.blobs);
+                const project = await ProjectConverter.readStorageProject(storageProject);
+                if (!(await restoreStoredProject(project))) throw new Error(LANG('file-storage-open-failed'));
+                markServerProjectClean();
+                this.statusOverlay.out(LANG('project-file-imported'), true);
+            } catch (error) {
+                showError(error instanceof Error ? error.message : LANG('file-storage-open-failed'));
+            } finally {
+                closeLoader?.();
+            }
         };
 
         const onOpenServerProject = async (id: string) => {
@@ -3073,6 +3123,8 @@ export class KlApp {
                   },
                   onImportRnsSprite: (file) => void importRnsSpriteFile(file),
                   onImportRnsPackage: (files) => void importRnsPackageFiles(files),
+                  onExportProjectFile: (serverName) => void exportProjectFile(serverName),
+                  onImportProjectFile: (file) => void importProjectFile(file),
                   onExportRnsSprite: () => void exportRnsSprite(),
                   onExportRnsPackage: () => void exportRnsPackage(),
                   onExportGif: () => {
@@ -3431,6 +3483,11 @@ export class KlApp {
                 target: document.body,
                 onDrop: (files, optionStr) => {
                     if (KL.DIALOG_COUNTER.get() > 0) {
+                        return;
+                    }
+                    const projectFile = Array.from(files).find((file) => file.name.toLowerCase().endsWith('.klecks'));
+                    if (projectFile) {
+                        void importProjectFile(projectFile);
                         return;
                     }
                     applyUncommitted();
