@@ -55,6 +55,8 @@ Renaming a key across multiple language files:
   "frames-delete": "Delete frame",
   "frames-left": "Move left",
   "frames-right": "Move right",
+  "frames-move-left": "Move frame left",
+  "frames-move-right": "Move frame right",
   "frames-frame": "Frame",
   "frames-limit-reached": "Frame memory limit reached. Delete frames or use a smaller canvas.",
   "frames-set-reference": "Set current frame as reference",

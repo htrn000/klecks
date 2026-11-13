@@ -205,6 +205,7 @@ export class ProjectPaletteUi {
             });
         });
         clear.classList.add(classes.clearButton);
+        clear.style.color = '#b00020';
         actions.append(extract, importButton, exportHex, exportGpl, clear);
         fileInput.addEventListener('change', async () => {
             const file = fileInput.files?.[0];
