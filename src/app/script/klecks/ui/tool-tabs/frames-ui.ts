@@ -47,6 +47,8 @@ export class FramesUi {
         hasSelection: false,
     };
     private copySelectionButton: HTMLButtonElement | undefined;
+    private renderedFrameOrder: string | undefined;
+    private renderedActiveFrameId: string | undefined;
 
     private iconButton(icon: IconName, title: string, callback: () => void | Promise<void>, disabled = false): HTMLButtonElement {
         const button = BB.el({
@@ -125,6 +127,10 @@ export class FramesUi {
     }
 
     private render(): void {
+        const previousList = this.rootEl.querySelector<HTMLElement>(`.${classes.frameList}`);
+        const previousScrollTop = previousList?.scrollTop ?? 0;
+        const previousFrameOrder = this.renderedFrameOrder;
+        const previousActiveFrameId = this.renderedActiveFrameId;
         this.rootEl.replaceChildren();
         this.activeThumbnailEl = undefined;
         this.copySelectionButton = undefined;
@@ -179,6 +185,21 @@ export class FramesUi {
             button.append(number);
             list.append(button);
         });
+        list.scrollTop = previousScrollTop;
+        const activeFrame = frameSet.frames[activeFrameIndex];
+        const frameOrder = frameSet.frames.map((frame) => frame.id).join('\u0000');
+        const activeFrameChanged = previousActiveFrameId !== activeFrame?.id || previousFrameOrder !== frameOrder;
+        if (activeFrameChanged) {
+            const activeTile = list.querySelector<HTMLElement>(`.${classes.frameActive}`);
+            if (activeTile) {
+                const listRect = list.getBoundingClientRect();
+                const tileRect = activeTile.getBoundingClientRect();
+                if (tileRect.top < listRect.top) list.scrollTop -= listRect.top - tileRect.top;
+                else if (tileRect.bottom > listRect.bottom) list.scrollTop += tileRect.bottom - listRect.bottom;
+            }
+        }
+        this.renderedFrameOrder = frameOrder;
+        this.renderedActiveFrameId = activeFrame?.id;
 
         const actions = BB.el({ parent: this.rootEl, className: classes.actionRow });
         actions.append(
