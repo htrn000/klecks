@@ -12,6 +12,7 @@ test('FrameSet project/storage conversion preserves geometry, order, active inde
         width: 600,
         height: 510,
         activeFrameIndex: 2,
+        baseLayer: { visible: true, opacity: 0.8 },
         sheet: {
             cellWidth: 600,
             cellHeight: 510,
@@ -41,6 +42,7 @@ test('FrameSet project/storage conversion preserves geometry, order, active inde
                     {
                         id: 'idle-layer',
                         name: 'Ink',
+                        role: 'frame-base',
                         isVisible: false,
                         opacity: 0.75,
                         mixModeStr: 'multiply',

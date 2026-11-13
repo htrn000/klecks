@@ -102,6 +102,7 @@ import { extractPaletteFromRgba, normalizePalette, TProjectPaletteData } from '.
 import { selectGifFrameRange, TRgbaFrame } from '../klecks/frames/gif-export';
 import { showGifExportDialog, showGifProgressDialog, TGifExportRequest } from '../klecks/ui/modals/gif-export-dialog';
 import { RemoteProjectStore } from '../klecks/storage/remote-project-store';
+import type { EditUi } from '../klecks/ui/tool-tabs/edit-ui';
 
 const toolPaintImg = getIconUrl('tool-paint');
 const toolHandImg = getIconUrl('tool-hand');
@@ -426,10 +427,12 @@ export class KlApp {
         let frameThumbnailRefreshTimeout: ReturnType<typeof setTimeout> | undefined;
         this.getActiveFrameState = () => activeFrameState;
         let framesUi: FramesUi | undefined;
+        let editUi: EditUi | undefined;
         let refreshGifExportAvailability: (() => void) | undefined;
         let isFrameActionInProgress = false;
 
         const clearLayer = (showStatus?: boolean, ignoreSelection?: boolean) => {
+            if (isFrameBaseActive()) { showFrameBaseReadOnly(); return; }
             applyUncommitted();
             const layerIndex = currentLayerIndex;
             this.klCanvas.eraseLayer({
@@ -452,6 +455,8 @@ export class KlApp {
         let currentBrushId: TBrushId;
         let lastNonEraserBrushId: TBrushId;
         let currentLayerIndex: number = this.klCanvas.getLayerCount() - 1;
+        const isFrameBaseActive = () => this.klCanvas.getLayer(currentLayerIndex).role === 'frame-base';
+        const showFrameBaseReadOnly = () => this.statusOverlay.out('Frame base layer is read-only — duplicate it to edit', true);
 
         // when cycling through brushes you need to know the next non-eraser brush
         const getNextBrushId = (): TBrushId => {
@@ -626,6 +631,7 @@ export class KlApp {
             tempHistory,
             statusOverlay: this.statusOverlay,
             onFill: () => {
+                if (isFrameBaseActive()) { showFrameBaseReadOnly(); return; }
                 this.klCanvas.layerFill(
                     currentLayerIndex,
                     this.klColorSlider.getColor(),
@@ -638,6 +644,7 @@ export class KlApp {
                 );
             },
             onErase: () => {
+                if (isFrameBaseActive()) { showFrameBaseReadOnly(); return; }
                 const layerIndex = currentLayerIndex;
                 this.klCanvas.eraseLayer({
                     layerIndex,
@@ -885,7 +892,7 @@ export class KlApp {
             refreshServerProjectHeader();
         });
         KL.DIALOG_COUNTER.subscribe((count) => {
-            this.easel.setIsFrozen(count > 0);
+            this.easel.setIsFrozen(count > 0 || isFrameBaseActive());
         });
 
         const updateMainTabVisibility = () => {
@@ -1521,6 +1528,10 @@ export class KlApp {
         const setCurrentLayer = (index: number) => {
             currentLayerIndex = index;
             currentBrushUi.setLayer(this.klCanvas.getLayer(currentLayerIndex));
+            const isFrameBase = this.klCanvas.getLayer(index).role === 'frame-base';
+            this.easel.setIsFrozen(isFrameBase || KL.DIALOG_COUNTER.get() > 0);
+            editUi?.updateReadOnlyState();
+            if (isFrameBase) showFrameBaseReadOnly();
         };
 
         const showFrameLimitError = () => showError(LANG('frames-limit-reached'));
@@ -1529,7 +1540,7 @@ export class KlApp {
             const state = activeFrameState;
             const frame = state?.frameSet.frames[state.activeFrameIndex];
             return {
-                hasReference: !!frame && state?.frameSet.referenceTrack?.[frame.id] !== undefined,
+                hasReference: !!frame && (frame.layers.some((layer) => layer.role === 'frame-base') || state?.frameSet.referenceTrack?.[frame.id] !== undefined),
                 hasSelection: !!this.klCanvas.getSelection()?.length,
                 canShowOnion: !!state && state.activeFrameIndex > 0,
                 showOriginal,
@@ -1563,29 +1574,32 @@ export class KlApp {
             return undefined;
         };
 
-        const createFrameComposite = async (frame: TFrame): Promise<HTMLCanvasElement> => {
-            if (onionComposite?.frame === frame) return onionComposite.canvas;
+        const createFrameComposite = async (frame: TFrame, excludeBase = false, forceBaseVisible = false): Promise<HTMLCanvasElement> => {
+            if (!excludeBase && !forceBaseVisible && onionComposite?.frame === frame) return onionComposite.canvas;
             const layers = await Promise.all(
                 frame.layers.map(async (layer, index) => ({
                     name: layer.name ?? LANG('layers-layer') + ' ' + (index + 1),
-                    isVisible: layer.isVisible ?? true,
-                    opacity: layer.opacity ?? 1,
+                    isVisible: layer.role === 'frame-base' && forceBaseVisible ? true : layer.isVisible ?? true,
+                    opacity: layer.role === 'frame-base' && forceBaseVisible ? 1 : layer.opacity ?? 1,
                     mixModeStr: (layer.mixModeStr ?? 'source-over') as TMixMode,
                     hasClipping: layer.hasClipping ?? false,
                     image: await loadCanvasImage(layer.image),
                 })),
             );
-            if (layers.some((layer) => !layer.image)) {
+            const renderLayers = excludeBase ? layers.filter((layer, index) => frame.layers[index].role !== 'frame-base') : layers;
+            if (renderLayers.some((layer) => !layer.image)) {
                 throw new Error('Frame image is unavailable for onion skin');
             }
-            const canvas = drawProject({
+            const canvas = renderLayers.length === 0 ? BB.canvas(activeFrameState!.frameSet.width, activeFrameState!.frameSet.height) : drawProject({
                 projectId: this.klCanvas.getProject().projectId,
                 width: activeFrameState!.frameSet.width,
                 height: activeFrameState!.frameSet.height,
-                layers: layers as TKlProject['layers'],
+                layers: renderLayers as TKlProject['layers'],
             });
-            if (onionComposite) BB.freeCanvas(onionComposite.canvas);
-            onionComposite = { frame, canvas };
+            if (!excludeBase && !forceBaseVisible) {
+                if (onionComposite) BB.freeCanvas(onionComposite.canvas);
+                onionComposite = { frame, canvas };
+            }
             return canvas;
         };
 
@@ -1610,7 +1624,7 @@ export class KlApp {
                     const previousFrame = state.frameSet.frames[state.activeFrameIndex - 1];
                     overlays.push({ image: await createFrameComposite(previousFrame), opacity: overlayOpacity });
                 }
-                if (showOriginal) {
+                if (showOriginal && !frame.layers.some((layer) => layer.role === 'frame-base')) {
                     const source = await getReferenceImage(frame.id);
                     if (source) overlays.push({ image: source, opacity: overlayOpacity });
                 }
@@ -1626,7 +1640,9 @@ export class KlApp {
         const getReferenceImage = async (frameId: string): Promise<CanvasImageSource | undefined> => {
             const cached = referenceImageCache.get(frameId);
             if (cached) return cached;
-            const image = await loadCanvasImage(activeFrameState?.frameSet.referenceTrack?.[frameId]);
+            const frame = activeFrameState?.frameSet.frames.find((item) => item.id === frameId);
+            const baseImage = frame?.layers.find((layer) => layer.role === 'frame-base')?.image;
+            const image = await loadCanvasImage(baseImage ?? activeFrameState?.frameSet.referenceTrack?.[frameId]);
             if (image) referenceImageCache.set(frameId, image);
             return image;
         };
@@ -1691,10 +1707,11 @@ export class KlApp {
                     opacity: layer.opacity,
                     mixModeStr: layer.mixModeStr,
                     hasClipping: layer.hasClipping,
+                    ...(layer.role ? { role: layer.role } : {}),
                     image: await canvasToBlob(layer.canvas, 'image/png'),
                 })),
             );
-            const composite = this.klCanvas.getCanvas();
+            const composite = this.klCanvas.getCanvasForExport();
             try {
                 framePixelCache.set(
                     frameId,
@@ -1764,6 +1781,7 @@ export class KlApp {
                             mixModeStr: (layer.mixModeStr ?? 'source-over') as TMixMode,
                             hasClipping: layer.hasClipping ?? false,
                             image: canvas,
+                            ...(layer.role ? { role: layer.role } : {}),
                         };
                     }),
                 );
@@ -1830,7 +1848,7 @@ export class KlApp {
             } finally {
                 isFrameActionInProgress = false;
                 this.toolspace.style.pointerEvents = previousToolspacePointerEvents;
-                this.easel.setIsFrozen(KL.DIALOG_COUNTER.get() > 0);
+                this.easel.setIsFrozen(KL.DIALOG_COUNTER.get() > 0 || isFrameBaseActive());
                 framesUi?.setBusy(false);
                 updateFramesUi();
                 void refreshFrameOverlays();
@@ -2188,6 +2206,13 @@ export class KlApp {
             onSetReference: () => runFrameAction(setCurrentFrameReference),
             onToggleOriginal: (show) => {
                 showOriginal = show;
+                if (activeFrameState) {
+                    const result = createFrameSet({ ...activeFrameState.frameSet, baseLayer: { visible: show, opacity: overlayOpacity } });
+                    if (result.ok) activeFrameState = { ...activeFrameState, frameSet: result.value };
+                    this.klCanvas.setFrameBaseAppearance(show, overlayOpacity);
+                    this.layersUi.update(undefined, true);
+                    this.easelProjectUpdater.update();
+                }
                 void refreshFrameOverlays();
             },
             onToggleOnion: (show) => {
@@ -2196,6 +2221,13 @@ export class KlApp {
             },
             onOpacityChange: (opacity) => {
                 overlayOpacity = opacity;
+                if (activeFrameState) {
+                    const result = createFrameSet({ ...activeFrameState.frameSet, baseLayer: { visible: showOriginal, opacity } });
+                    if (result.ok) activeFrameState = { ...activeFrameState, frameSet: result.value };
+                    this.klCanvas.setFrameBaseAppearance(showOriginal, opacity);
+                    this.layersUi.update(undefined, true);
+                    this.easelProjectUpdater.update();
+                }
                 void refreshFrameOverlays();
             },
             onCopyOriginal: () => runFrameAction(() => copyReferenceToCurrentLayer(false)),
@@ -2238,7 +2270,7 @@ export class KlApp {
         this.layerPreview.setIsVisible(toolspaceLayout.isLayerPreviewVisible);
         this.layerPreview.setIsSmall(toolspaceLayout.isLayerPreviewSmall);
 
-        const editUi = new KL.EditUi({
+        editUi = new KL.EditUi({
             klRootEl: this.rootEl,
             klColorSlider: this.klColorSlider,
             layersUi: this.layersUi,
@@ -2259,6 +2291,7 @@ export class KlApp {
                 copyToClipboard(false, false);
             },
             onPaste: () => importHandler.readClipboard(),
+            isCurrentLayerReadOnly: isFrameBaseActive,
         });
 
         const klHistoryExecutor = new KlHistoryExecutor({
@@ -2307,7 +2340,7 @@ export class KlApp {
         const shareImage = (callback?: () => void) => {
             applyUncommitted();
             BB.shareCanvas({
-                canvas: this.klCanvas.getCanvas(),
+                canvas: this.klCanvas.getCanvasForExport(),
                 fileName: getFilenameDate() + KL_CONFIG.filenameBase + '.png',
                 title: getFilenameDate() + KL_CONFIG.filenameBase + '.png',
                 callback: callback ? callback : () => {},
@@ -2326,7 +2359,7 @@ export class KlApp {
             KL.clipboardDialog(
                 this.rootEl,
                 (maskSelection) => {
-                    return this.klCanvas.getCanvas(1, maskSelection);
+                    return this.klCanvas.getCanvasForExport(1, maskSelection ? this.klCanvas.getSelection() : undefined);
                 },
                 (inputObj) => {
                     if (
@@ -2538,6 +2571,10 @@ export class KlApp {
                     frameSet: validated.value,
                     activeFrameIndex,
                 };
+                if (validated.value.baseLayer) {
+                    showOriginal = validated.value.baseLayer.visible;
+                    overlayOpacity = validated.value.baseLayer.opacity;
+                }
                 updateFramesUi();
                 const restoredFrame = await restoreFrame(
                     activeFrameState.frameSet.frames[activeFrameIndex],
@@ -2631,6 +2668,7 @@ export class KlApp {
                         }
                         const frameSetInput = {
                             ...imported.value.frameSet,
+                            baseLayer: { visible: true, opacity: 0.35 },
                             ...(packageData ? { rnsPackage: packageData } : {}),
                         };
                         const result = createFrameSet(frameSetInput);
@@ -2760,8 +2798,9 @@ export class KlApp {
             for (const frame of frameSet.frames) {
                 let pixels = framePixelCache.get(frame.id);
                 if (!pixels) {
-                    const composite = await createFrameComposite(frame);
+                    const composite = await createFrameComposite(frame, true);
                     pixels = new Uint8Array(BB.ctx(composite, { willReadFrequently: true }).getImageData(0, 0, frameSet.width, frameSet.height).data);
+                    BB.freeCanvas(composite);
                     framePixelCache.set(frame.id, pixels);
                 }
                 cells.push(pixels);
@@ -2805,11 +2844,12 @@ export class KlApp {
                     const frame = selected[index];
                     let pixels = framePixelCache.get(frame.id);
                     if (!pixels) {
-                        const composite = await createFrameComposite(frame);
+                        const composite = await createFrameComposite(frame, true);
                         pixels = new Uint8Array(
                             BB.ctx(composite, { willReadFrequently: true })
                                 .getImageData(0, 0, frameSet.width, frameSet.height).data,
                         );
+                        BB.freeCanvas(composite);
                     }
                     frames.push({ width: frameSet.width, height: frameSet.height, pixels: pixels.slice() });
                     progress.update((index + 1) / selected.length * 0.15);
@@ -3393,7 +3433,7 @@ export class KlApp {
     }
 
     async getPNG(): Promise<Blob> {
-        return await canvasToBlob(this.klCanvas.getCanvas(), 'image/png');
+        return await canvasToBlob(this.klCanvas.getCanvasForExport(), 'image/png');
     }
 
     getPSD = async (): Promise<Blob> => {
@@ -3422,6 +3462,7 @@ export class KlApp {
                           opacity: layer.opacity,
                           mixModeStr: layer.mixModeStr,
                           hasClipping: layer.hasClipping,
+                      ...(layer.role ? { role: layer.role } : {}),
                           image: layer.canvas,
                       })),
                   }
@@ -3441,7 +3482,13 @@ export class KlApp {
 
     private createActiveFrameThumbnail(): string {
         const factor = 64 / Math.max(this.klCanvas.getWidth(), this.klCanvas.getHeight());
-        const thumbnailCanvas = drawProject(this.klCanvas.getProject(), factor, undefined, 'high');
+        const project = this.klCanvas.getProject();
+        const thumbnailCanvas = drawProject({
+            ...project,
+            layers: project.layers.map((layer) => layer.role === 'frame-base'
+                ? { ...layer, isVisible: true, opacity: 1 }
+                : layer),
+        }, factor, undefined, 'high');
         try {
             return thumbnailCanvas.toDataURL('image/png');
         } finally {

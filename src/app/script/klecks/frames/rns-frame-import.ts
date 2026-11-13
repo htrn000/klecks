@@ -25,8 +25,8 @@ export type TRnsFrameImportOptions = {
 };
 
 /**
- * Creates per-cell frame data for an R&S import. Original pixels are retained
- * as both a hidden layer and a read-only reference; the editable layer starts blank.
+ * Creates per-cell frame data. Editable imports keep the original in a frame-base
+ * layer and start a transparent editable layer above it.
  */
 export function buildRnsImportedFrameSet(
     framePixels: readonly Uint8Array[],
@@ -37,19 +37,18 @@ export function buildRnsImportedFrameSet(
     const makeId = options.makeId ?? (() => `rns-import-${nextId++}`);
 
     const makeCandidate = (includeEditableLayer: boolean) => {
-        const referenceTrack: Record<string, unknown> = {};
         const frames = framePixels.map((pixels) => {
             const id = makeId();
             const originalImage = options.createImage ? options.createImage(pixels.slice()) : pixels.slice();
-            referenceTrack[id] = originalImage;
             const layers = [{
                 id: makeId(),
                 name: options.originalLayerName,
-                isVisible: !includeEditableLayer,
-                opacity: 1,
+                isVisible: true,
+                opacity: includeEditableLayer ? 0.35 : 1,
                 mixModeStr: 'source-over',
                 hasClipping: false,
                 image: originalImage,
+                ...(includeEditableLayer ? { role: 'frame-base' as const } : {}),
             }];
             if (includeEditableLayer) {
                 layers.push({
@@ -69,7 +68,7 @@ export function buildRnsImportedFrameSet(
             height: geometry.cellHeight,
             frames,
             sheet: geometry,
-            referenceTrack,
+            ...(includeEditableLayer ? { baseLayer: { visible: true, opacity: 0.35 } } : {}),
         });
     };
 

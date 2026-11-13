@@ -83,6 +83,7 @@ export type TKlLayer<GImage> = {
     opacity: number;
     hasClipping: boolean;
     image: GImage;
+    role?: 'frame-base';
 };
 
 export type TKlNamedLayer<GImage> = TKlLayer<GImage> & {

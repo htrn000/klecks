@@ -67,6 +67,7 @@ Renaming a key across multiple language files:
   "frames-copy-reference": "Copy original to current layer",
   "frames-copy-reference-selection": "Copy original selection to current layer",
   "frames-original-layer": "Original",
+  "frames-base-controlled": "Controlled by frame overlay",
   "rns-layer-memory-fallback": "Layer memory limit reached; imported frames use one visible layer.",
   "rns-import-sprite": "Import Sprite sheet (Rabbit and Steel)…",
   "rns-import-package-zip": "Import R&S Mods ZIP…",

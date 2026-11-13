@@ -3,7 +3,7 @@ import { BB } from '../../../../bb/bb';
 import { changeCanvasDimensions } from '../../../../bb/base/change-canvas-dimensions';
 import { SelectCustom } from '../../components/select-custom';
 import { PointSlider } from '../../components/point-slider';
-import { KlCanvas } from '../../../canvas/kl-canvas';
+import { KlCanvas, TKlCanvasLayer } from '../../../canvas/kl-canvas';
 import { TMixMode } from '../../../kl-types';
 import { LANG } from '../../../../language/language';
 import { translateBlending } from '../../../canvas/translate-blending';
@@ -34,6 +34,7 @@ type TLayerEl = HTMLElement & {
     pointerListener: PointerListener;
     opacitySlider: PointSlider;
     isSelected: boolean;
+    isFrameBase: boolean;
 };
 
 export type TLayersUiParams = {
@@ -60,13 +61,7 @@ export class LayersUi {
 
     private readonly rootEl: HTMLElement;
     private isVisible: boolean = true;
-    private klCanvasLayerArr: {
-        context: CanvasRenderingContext2D;
-        opacity: number;
-        name: string;
-        mixModeStr: TMixMode;
-        hasClipping: boolean;
-    }[];
+    private klCanvasLayerArr: TKlCanvasLayer[];
     private readonly layerListEl: HTMLElement;
     private layerElArr: TLayerEl[];
     private selectedSpotIndex: number;
@@ -90,6 +85,8 @@ export class LayersUi {
         if (isNaN(oldSpotIndex) || isNaN(newSpotIndex)) {
             throw 'layers-ui - invalid move';
         }
+        if (this.klCanvasLayerArr[oldSpotIndex]?.role === 'frame-base') return;
+        if (newSpotIndex === 0 && this.klCanvasLayerArr.some((item) => item.role === 'frame-base')) newSpotIndex = 1;
         for (let i = 0; i < this.layerElArr.length; i++) {
             ((i) => {
                 let posy = this.layerElArr[i].spot;
@@ -183,6 +180,7 @@ export class LayersUi {
             const isVisible = klLayer.isVisible;
             const layercanvas = this.klCanvasLayerArr[index].context.canvas;
             const hasClipping = this.klCanvasLayerArr[index].hasClipping;
+            const isFrameBase = this.klCanvasLayerArr[index].role === 'frame-base';
             const clippingOffset = hasClipping ? 15 : 0;
 
             const layer: TLayerEl = BB.el({
@@ -208,6 +206,7 @@ export class LayersUi {
             innerLayer.append(container1, container2);
 
             layer.spot = index;
+            layer.isFrameBase = isFrameBase;
 
             //checkbox - visibility
             {
@@ -240,7 +239,11 @@ export class LayersUi {
                     },
                 });
                 check.checked = isVisible;
+                check.disabled = isFrameBase;
+                check.title = isFrameBase ? LANG('frames-base-controlled') : LANG('layers-visibility-toggle');
+                checkWrapper.title = check.title;
                 check.onchange = () => {
+                    if (isFrameBase) return;
                     this.klCanvas.setLayerIsVisible(layer.spot, check.checked);
                     if (layer.spot === this.selectedSpotIndex) {
                         this.onSelect(this.selectedSpotIndex, false);
@@ -305,13 +308,18 @@ export class LayersUi {
                 });
                 layer.layerName = layerName;
                 layer.label.append(layer.layerName);
+                if (isFrameBase) {
+                    const lock = getIconSvg('lock-alpha', { width: 12, height: 12 });
+                    css(lock, { position: 'absolute', left: paddingLeft + 34, top: 5, opacity: 0.75 });
+                    layer.append(lock);
+                }
 
                 css(layer.label, {
                     position: 'absolute',
-                    left: 1 + 32 + 5 + paddingLeft + clippingOffset,
+                    left: 1 + 32 + 5 + paddingLeft + clippingOffset + (isFrameBase ? 14 : 0),
                     top: 1,
                     fontSize: 13,
-                    width: 165 - clippingOffset,
+                    width: 165 - clippingOffset - (isFrameBase ? 14 : 0),
                     height: 20,
                     overflow: 'hidden',
                     whiteSpace: 'nowrap',
@@ -370,8 +378,12 @@ export class LayersUi {
                     }
                     this.onUpdateProject();
                 },
-                getDoIgnore: () => this.isManipulating,
+                getDoIgnore: () => isFrameBase || this.isManipulating,
             });
+            if (isFrameBase) {
+                css(opacitySlider.getElement(), { pointerEvents: 'none', opacity: 0.45 });
+                opacitySlider.getElement().title = LANG('frames-base-controlled');
+            }
             css(opacitySlider.getElement(), {
                 position: 'absolute',
                 left: 39 + paddingLeft + clippingOffset,
@@ -520,13 +532,16 @@ export class LayersUi {
     private updateButtons(): void {
         const maxReached = this.klCanvas.isLayerLimitReached();
         const oneLayer = this.klCanvasLayerArr.length === 1;
+        const selectedBase = this.klCanvasLayerArr[this.selectedSpotIndex]?.role === 'frame-base';
+        const hasBase = this.klCanvasLayerArr.some((layer) => layer.role === 'frame-base');
 
         this.addBtn.disabled = maxReached;
-        this.removeBtn.disabled = oneLayer;
+        this.removeBtn.disabled = oneLayer || selectedBase;
         this.duplicateBtn.disabled = maxReached;
-        this.mergeBtn.disabled = this.selectedSpotIndex === 0;
-        this.moreDropdown.setEnabled('advanced-merge', !oneLayer);
-        this.moreDropdown.setEnabled('merge-all', !oneLayer);
+        this.mergeBtn.disabled = this.selectedSpotIndex === 0 || selectedBase || this.klCanvasLayerArr[this.selectedSpotIndex - 1]?.role === 'frame-base';
+        this.moreDropdown.setEnabled('clear-layer', !selectedBase);
+        this.moreDropdown.setEnabled('advanced-merge', !oneLayer && !selectedBase && this.klCanvasLayerArr[this.selectedSpotIndex - 1]?.role !== 'frame-base');
+        this.moreDropdown.setEnabled('merge-all', !oneLayer && !hasBase);
     }
 
     private mergeLayer(mixModeStr?: TMixMode): void {
@@ -815,14 +830,14 @@ export class LayersUi {
     }
 
     // ---- interface ----
-    update(activeLayerSpotIndex?: number): void {
+    update(activeLayerSpotIndex?: number, force = false): void {
         this.klCanvasLayerArr = this.klCanvas.getLayers();
         if (activeLayerSpotIndex || activeLayerSpotIndex === 0) {
             this.selectedSpotIndex = activeLayerSpotIndex;
         }
         this.updateButtons();
         if (this.isVisible) {
-            this.createLayerList();
+            this.createLayerList(force);
         }
     }
 
@@ -839,6 +854,11 @@ export class LayersUi {
         this.selectedSpotIndex = spotIndex;
         this.modeSelect.setValue(this.klCanvasLayerArr[this.selectedSpotIndex].mixModeStr);
         this.clippingToggle.setValue(this.klCanvasLayerArr[this.selectedSpotIndex].hasClipping);
+        const selectedBase = this.klCanvasLayerArr[this.selectedSpotIndex].role === 'frame-base';
+        css(this.modeSelect.getElement(), { pointerEvents: selectedBase ? 'none' : 'auto', opacity: selectedBase ? 0.45 : 1 });
+        css(this.clippingToggle.getElement(), { pointerEvents: selectedBase ? 'none' : 'auto', opacity: selectedBase ? 0.45 : 1 });
+        this.modeSelect.getElement().title = selectedBase ? LANG('frames-base-controlled') : '';
+        this.clippingToggle.getElement().title = selectedBase ? LANG('frames-base-controlled') : LANG('layers-clipping');
         for (let i = 0; i < this.layerElArr.length; i++) {
             const layer = this.layerElArr[i];
             const isSelected = this.selectedSpotIndex === layer.spot;
@@ -850,7 +870,8 @@ export class LayersUi {
             layer.opacitySlider.setActive(isSelected);
             layer.isSelected = isSelected;
         }
-        this.mergeBtn.disabled = this.selectedSpotIndex === 0;
+        this.mergeBtn.disabled = this.selectedSpotIndex === 0 || this.klCanvasLayerArr[this.selectedSpotIndex]?.role === 'frame-base' || this.klCanvasLayerArr[this.selectedSpotIndex - 1]?.role === 'frame-base';
+        this.updateButtons();
     }
 
     getElement(): HTMLElement {

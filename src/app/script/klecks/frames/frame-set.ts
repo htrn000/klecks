@@ -13,6 +13,7 @@ export type TFrameLayer = {
     opacity?: number;
     mixModeStr?: string;
     hasClipping?: boolean;
+    role?: 'frame-base';
     /** Opaque storage handle; the model does not depend on browser image types. */
     image: unknown;
 };
@@ -55,6 +56,8 @@ export type TFrameSet = {
     rnsPackage?: TRnsPackageData;
     /** Optional read-only original image handles keyed by stable frame id. */
     referenceTrack?: Record<string, unknown>;
+    /** Shared display settings for imported frame-base layers. */
+    baseLayer?: { visible: boolean; opacity: number };
 };
 
 /** Project-level FrameSet payload with the frame selected when the project was last stored. */
@@ -132,6 +135,11 @@ export function frameSetMemoryBytes(frameSet: TFrameSet): bigint {
     );
 }
 
+/** Layers intentionally omitted from PNG/PSD/GIF/R&S composites. */
+export function getExportableFrameLayers<T extends { role?: string }>(layers: readonly T[]): T[] {
+    return layers.filter((layer) => layer.role !== 'frame-base');
+}
+
 /**
  * Validate untrusted FrameSet input without throwing for ordinary malformed user data.
  * The aggregate estimate uses raw RGBA bytes, not compressed PNG sizes.
@@ -140,7 +148,7 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
     if (!isRecord(input)) {
         return error('invalid-frame-set', 'FrameSet must be an object');
     }
-    const { width, height, frames, sheet, referenceTrack, rnsPackage } = input;
+    const { width, height, frames, sheet, referenceTrack, rnsPackage, baseLayer } = input;
     if (!isPositiveSafeInteger(width) || !isPositiveSafeInteger(height)) {
         return error('invalid-size', 'Frame width and height must be positive safe integers');
     }
@@ -168,9 +176,20 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
             return error('frame-layer-limit', 'Frame layer count exceeds the per-frame memory limit', frameIndex);
         }
         const layers: TFrameLayer[] = [];
-        for (const layer of frame.layers) {
+        let baseLayerIndex = -1;
+        for (let layerIndex = 0; layerIndex < frame.layers.length; layerIndex++) {
+            const layer = frame.layers[layerIndex];
             if (!isRecord(layer) || typeof layer.id !== 'string' || !layer.id.trim() || !('image' in layer)) {
                 return error('invalid-layer-stack', 'Each layer needs a non-empty id and image handle', frameIndex);
+            }
+            if (layer.role !== undefined && layer.role !== 'frame-base') {
+                return error('invalid-layer-stack', 'Layer role is invalid', frameIndex);
+            }
+            if (layer.role === 'frame-base') {
+                if (baseLayerIndex !== -1 || layerIndex !== 0) {
+                    return error('invalid-layer-stack', 'Frame base layer must be unique and at index 0', frameIndex);
+                }
+                baseLayerIndex = layerIndex;
             }
             layers.push({
                 id: layer.id,
@@ -180,6 +199,7 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
                 ...(typeof layer.opacity === 'number' ? { opacity: layer.opacity } : {}),
                 ...(typeof layer.mixModeStr === 'string' ? { mixModeStr: layer.mixModeStr } : {}),
                 ...(typeof layer.hasClipping === 'boolean' ? { hasClipping: layer.hasClipping } : {}),
+                ...(layer.role === 'frame-base' ? { role: 'frame-base' as const } : {}),
             });
         }
         memoryBytes += frameMemoryBytes(width, height, layers.length);
@@ -191,6 +211,25 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
             layers,
             ...(typeof frame.thumbnail === 'string' ? { thumbnail: frame.thumbnail } : {}),
         });
+    }
+
+    let validatedBaseLayer: { visible: boolean; opacity: number } | undefined;
+    if (baseLayer !== undefined) {
+        if (!isRecord(baseLayer) || typeof baseLayer.visible !== 'boolean' || typeof baseLayer.opacity !== 'number' || !Number.isFinite(baseLayer.opacity) || baseLayer.opacity < 0 || baseLayer.opacity > 1) {
+            return error('invalid-frame-set', 'Base layer appearance settings are invalid');
+        }
+        validatedBaseLayer = { visible: baseLayer.visible, opacity: baseLayer.opacity };
+    } else if (validatedFrames.some((frame) => frame.layers.some((layer) => layer.role === 'frame-base'))) {
+        validatedBaseLayer = { visible: true, opacity: 0.35 };
+    }
+    if (validatedBaseLayer) {
+        for (const frame of validatedFrames) {
+            const base = frame.layers.find((layer) => layer.role === 'frame-base');
+            if (base) {
+                base.isVisible = validatedBaseLayer.visible;
+                base.opacity = validatedBaseLayer.opacity;
+            }
+        }
     }
 
     let validatedReferenceTrack: Record<string, unknown> | undefined;
@@ -267,6 +306,7 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
             ...(validatedSheet ? { sheet: validatedSheet } : {}),
             ...(rnsPackage ? { rnsPackage: rnsPackage as unknown as TRnsPackageData } : {}),
             ...(validatedReferenceTrack ? { referenceTrack: validatedReferenceTrack } : {}),
+            ...(validatedBaseLayer ? { baseLayer: validatedBaseLayer } : {}),
         },
         memoryBytes,
     };
@@ -310,6 +350,7 @@ function operationResult(
         ...(sheet ? { sheet } : {}),
         ...(original.rnsPackage ? { rnsPackage: original.rnsPackage } : {}),
         ...(referenceTrack ? { referenceTrack } : {}),
+        ...(original.baseLayer ? { baseLayer: original.baseLayer } : {}),
     });
     return validation.ok
         ? { ok: true, value: { frameSet: validation.value, activeFrameIndex } }

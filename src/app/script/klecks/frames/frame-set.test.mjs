@@ -6,6 +6,7 @@ import {
     deleteFrame,
     duplicateFrame,
     FRAME_SET_MEMORY_BUDGET_BYTES,
+    getExportableFrameLayers,
     moveFrame,
     selectFrame,
 } from './frame-set.ts';
@@ -108,6 +109,48 @@ test('rejects aggregate frame storage over the 2 GiB budget', () => {
     assert.equal(result.ok, false);
     assert.equal(result.error.code, 'frame-set-memory-limit');
     assert.equal(result.error.frameIndex, 2);
+});
+
+test('base appearance is shared across frames and remains stable through A-B-A selection', () => {
+    const baseA = { rgba: new Uint8Array([1, 2, 3, 255]), thumbnail: 'data:a' };
+    const baseB = { rgba: new Uint8Array([4, 5, 6, 255]), thumbnail: 'data:b' };
+    const result = createFrameSet({
+        width: 1,
+        height: 1,
+        baseLayer: { visible: true, opacity: 0.8 },
+        frames: [
+            { id: 'a', thumbnail: baseA.thumbnail, layers: [{ id: 'ba', image: baseA, role: 'frame-base', isVisible: false, opacity: 1 }] },
+            { id: 'b', thumbnail: baseB.thumbnail, layers: [{ id: 'bb', image: baseB, role: 'frame-base', isVisible: true, opacity: 0.1 }] },
+        ],
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.frames.map((frame) => frame.layers[0].isVisible), [true, true]);
+    assert.deepEqual(result.value.frames.map((frame) => frame.layers[0].opacity), [0.8, 0.8]);
+    const original = structuredClone(result.value.frames[0]);
+    let state = { frameSet: result.value, activeFrameIndex: 0 };
+    state = selectFrame(state, 1).value;
+    state = selectFrame(state, 0).value;
+    assert.deepEqual(state.frameSet.frames[0], original);
+});
+
+test('export omits the frame base but includes its editable duplicate', () => {
+    const frame = { id: 'a', layers: [
+        { id: 'base', role: 'frame-base', image: 'original' },
+        { id: 'copy', image: 'editable-copy' },
+        { id: 'ink', image: 'editable-ink' },
+    ] };
+    assert.deepEqual(getExportableFrameLayers(frame.layers).map((layer) => layer.image), ['editable-copy', 'editable-ink']);
+});
+
+test('frame-base role is limited to one layer at index zero', () => {
+    for (const layers of [
+        [{ id: 'editable', image: 'x' }, { id: 'base', role: 'frame-base', image: 'base' }],
+        [{ id: 'base1', role: 'frame-base', image: 'base' }, { id: 'base2', role: 'frame-base', image: 'base2' }],
+    ]) {
+        const result = createFrameSet({ width: 1, height: 1, frames: [{ id: 'a', layers }] });
+        assert.equal(result.ok, false);
+        assert.equal(result.error.code, 'invalid-layer-stack');
+    }
 });
 
 test('enforces the shared per-frame layer limit', () => {

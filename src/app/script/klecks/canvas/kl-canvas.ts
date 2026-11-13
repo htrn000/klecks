@@ -48,6 +48,7 @@ import { TIndexBounds } from '../../bb/bb-types';
 import { LayerCompositor } from './layer-compositor';
 import { getMixModeStr } from './get-mix-mode';
 import { canAddLayer, maxLayersFor } from './layer-limits';
+import { getExportableFrameLayers } from '../frames/frame-set';
 export { canAddLayer, LAYER_MEMORY_BUDGET_BYTES, MAX_LAYERS, maxLayersFor } from './layer-limits';
 
 export type TKlCanvasLayer = {
@@ -61,6 +62,7 @@ export type TKlCanvasLayer = {
     compositeObj?: TLayerComposite;
     canvas: HTMLCanvasElement;
     context: CanvasRenderingContext2D;
+    role?: 'frame-base';
 };
 
 export type TLayerComposite = {
@@ -159,14 +161,20 @@ export class KlCanvas {
                     layer.isVisible = pItem.isVisible;
                     layer.mixModeStr = pItem.mixModeStr;
                     layer.hasClipping = pItem.hasClipping;
+                    layer.role = pItem.role;
                     changeCanvasDimensions(layer.canvas, this.width, this.height, {
                         ensureCleared: true,
                     });
                     layer.context.drawImage(pItem.image, 0, 0);
-                    this.setOpacity(i, pItem.opacity);
+                    if (layer.role === 'frame-base') {
+                        layer.opacity = Math.max(0, Math.min(1, pItem.opacity));
+                    } else {
+                        this.setOpacity(i, pItem.opacity);
+                    }
                 }
             } else {
                 const layer = this.layers[0];
+                layer.role = undefined;
                 layer.name = p.layerName ? p.layerName : LANG('layers-layer') + ' 1';
                 layer.isVisible = true;
                 layer.hasClipping = false;
@@ -392,6 +400,7 @@ export class KlCanvas {
             opacity: data ? data.opacity : 1,
             canvas,
             context,
+            role: undefined,
         };
 
         this.layers.splice(index, 0, layer);
@@ -440,11 +449,11 @@ export class KlCanvas {
         const newLayer: TKlCanvasLayer = {
             id: layerId,
             index: newIndex,
-            name: srcLayer.name + ' ' + LANG('layers-copy'),
-            mixModeStr: srcLayer.mixModeStr,
-            hasClipping: srcLayer.hasClipping,
-            isVisible: srcLayer.isVisible,
-            opacity: srcLayer.opacity,
+            name: srcLayer.role === 'frame-base' ? srcLayer.name + ' copy' : srcLayer.name + ' ' + LANG('layers-copy'),
+            mixModeStr: srcLayer.role === 'frame-base' ? 'source-over' : srcLayer.mixModeStr,
+            hasClipping: srcLayer.role === 'frame-base' ? false : srcLayer.hasClipping,
+            isVisible: srcLayer.role === 'frame-base' ? true : srcLayer.isVisible,
+            opacity: srcLayer.role === 'frame-base' ? 1 : srcLayer.opacity,
             canvas,
             context: ctx,
         };
@@ -498,6 +507,16 @@ export class KlCanvas {
         return srcIndex + 1;
     }
 
+    /** Apply shared frame-base visibility and opacity without adding history entries. */
+    setFrameBaseAppearance(visible: boolean, opacity: number): void {
+        for (const layer of this.layers) {
+            if (layer.role === 'frame-base') {
+                layer.isVisible = visible;
+                layer.opacity = Math.max(0, Math.min(1, opacity));
+            }
+        }
+    }
+
     getLayerContext(index: number, doReturnNull?: boolean): CanvasRenderingContext2D | null {
         if (this.layers[index]) {
             return this.layers[index].context;
@@ -512,7 +531,7 @@ export class KlCanvas {
 
     removeLayer(index: number): false | number {
         const toDeleteLayer = this.layers[index];
-        if (!toDeleteLayer) {
+        if (!toDeleteLayer || toDeleteLayer.role === 'frame-base') {
             return false;
         }
         BB.freeCanvas(toDeleteLayer.canvas);
@@ -551,7 +570,7 @@ export class KlCanvas {
     }
 
     setOpacity(layerIndex: number, opacity: number): void {
-        if (!this.layers[layerIndex]) {
+        if (!this.layers[layerIndex] || this.layers[layerIndex].role === 'frame-base') {
             return;
         }
         opacity = Math.max(0, Math.min(1, opacity));
@@ -574,6 +593,7 @@ export class KlCanvas {
     }
 
     setLayerIsVisible(layerIndex: number, isVisible: boolean): void {
+        if (this.layers[layerIndex]?.role === 'frame-base') return;
         if (this.layers[layerIndex]) {
             this.layers[layerIndex].isVisible = isVisible;
         } else {
@@ -597,6 +617,7 @@ export class KlCanvas {
     }
 
     setLayerHasClipping(layerIndex: number, hasClipping: boolean): void {
+        if (this.layers[layerIndex]?.role === 'frame-base') return;
         if (this.layers[layerIndex]) {
             this.layers[layerIndex].hasClipping = hasClipping;
         } else {
@@ -618,9 +639,10 @@ export class KlCanvas {
         if (delta === 0) {
             return;
         }
-        if (!this.layers[index]) {
+        if (!this.layers[index] || this.layers[index].role === 'frame-base') {
             return;
         }
+        if (index + delta <= 0) delta = 1 - index;
         const temp = this.layers[index];
         this.layers.splice(index, 1);
         const targetIndex = Math.max(0, Math.min(index + delta, this.layers.length));
@@ -640,7 +662,7 @@ export class KlCanvas {
     mergeLayer(layerIndex: number, mixModeStr?: TMixMode): number | undefined {
         const topLayer = this.layers[layerIndex];
         const bottomLayer = this.layers[layerIndex - 1];
-        if (!bottomLayer || !topLayer) {
+        if (!bottomLayer || !topLayer || topLayer.role === 'frame-base' || bottomLayer.role === 'frame-base') {
             return;
         }
 
@@ -678,7 +700,7 @@ export class KlCanvas {
     }
 
     mergeAll(): number | false {
-        if (this.layers.length <= 1) {
+        if (this.layers.length <= 1 || this.layers.some((layer) => layer.role === 'frame-base')) {
             return false;
         }
 
@@ -827,6 +849,7 @@ export class KlCanvas {
     // arbitrary drawing operation & focus layer
     drawOperation(layerIndex: number, operation: (ctx: CanvasRenderingContext2D) => void): void {
         const targetLayer = this.layers[layerIndex];
+        if (!targetLayer || targetLayer.role === 'frame-base') return;
         const ctx = targetLayer.context;
         operation(ctx);
 
@@ -847,6 +870,7 @@ export class KlCanvas {
         compositeOperation?: string,
         doClipSelection?: boolean,
     ): void {
+        if (!this.layers[layerIndex] || this.layers[layerIndex].role === 'frame-base') return;
         const ctx = this.layers[layerIndex].context;
         ctx.save();
         const isUniformFill =
@@ -898,6 +922,7 @@ export class KlCanvas {
         grow: number, // int >= 0 - radius around filled area that is to be filled too
         isContiguous: boolean,
     ): void {
+        if (this.layers[layerIndex]?.role === 'frame-base') return;
         if (x < 0 || y < 0 || x >= this.width || y >= this.height || opacity === 0) {
             return;
         }
@@ -1040,6 +1065,7 @@ export class KlCanvas {
             return;
         }
         const targetLayer = this.layers[layerIndex];
+        if (!targetLayer || targetLayer.role === 'frame-base') return;
         const selectionPath = this.selection
             ? new Path2D(getSelectionPath2d(this.selection))
             : undefined;
@@ -1081,6 +1107,7 @@ export class KlCanvas {
 
     text(layerIndex: number, p: TRenderTextParam): void {
         const targetLayer = this.layers[layerIndex];
+        if (!targetLayer || targetLayer.role === 'frame-base') return;
         const rect = renderText(
             targetLayer.canvas,
             BB.copyObj(p),
@@ -1121,6 +1148,7 @@ export class KlCanvas {
         useSelection?: boolean; // default false
     }): void {
         const targetLayer = this.layers[p.layerIndex];
+        if (!targetLayer || targetLayer.role === 'frame-base') return;
         const ctx = targetLayer.context;
         ctx.save();
         let bounds: TIndexBounds | undefined;
@@ -1189,6 +1217,15 @@ export class KlCanvas {
         return drawProject(this.getProject(), factor, masksSelection ? this.selection : undefined);
     }
 
+    getCanvasForExport(factor: number = 1, masksSelection?: MultiPolygon): HTMLCanvasElement {
+        const project = this.getProject();
+        const layers = getExportableFrameLayers(project.layers);
+        if (layers.length === 0) {
+            return BB.canvas(Math.max(1, Math.round(project.width * factor)), Math.max(1, Math.round(project.height * factor)));
+        }
+        return drawProject({ ...project, layers }, factor, masksSelection);
+    }
+
     getProject(): TKlProject {
         return {
             projectId: this.klHistory.getComposed().projectId.value,
@@ -1202,6 +1239,7 @@ export class KlCanvas {
                     mixModeStr: layer.mixModeStr,
                     hasClipping: layer.hasClipping,
                     image: layer.canvas,
+                    ...(layer.role ? { role: layer.role } : {}),
                 };
             }),
         };
@@ -1216,6 +1254,7 @@ export class KlCanvas {
 
     setMixMode(layerIndex: number, mixModeStr: TMixMode): void {
         const targetLayer = this.layers[layerIndex];
+        if (!targetLayer || targetLayer.role === 'frame-base') return;
         targetLayer.mixModeStr = mixModeStr;
 
         if (!this.klHistory.isPaused()) {

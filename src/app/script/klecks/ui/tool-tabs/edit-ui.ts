@@ -33,6 +33,7 @@ export type TEditUiParams = {
     klHistory: KlHistory;
     onCopyToClipboard: () => void;
     onPaste: () => void;
+    isCurrentLayerReadOnly?: () => boolean;
 };
 
 export class EditUi {
@@ -51,9 +52,11 @@ export class EditUi {
     private readonly klHistory: KlHistory;
     private readonly onCopyToClipboard: () => void;
     private readonly onPaste: () => void;
+    private readonly isCurrentLayerReadOnly: () => boolean;
 
     private readonly rootEl: HTMLDivElement;
     private isInit = false;
+    private readonly filterButtons: { button: HTMLButtonElement; available: boolean }[] = [];
 
     private testHasWebGL(): boolean {
         return !!getSharedFx();
@@ -180,6 +183,10 @@ This has been reported to Google.
                     }
 
                     const applyFilter = (input: any) => {
+                        if (this.isCurrentLayerReadOnly()) {
+                            this.statusOverlay.out('Frame base layer is read-only — duplicate it to edit', true);
+                            return;
+                        }
                         const filterResult = filters[filterKey].apply!({
                             layer: this.klCanvas.getLayer(this.getCurrentLayerIndex()),
                             klCanvas: this.klCanvas,
@@ -282,6 +289,9 @@ This has been reported to Google.
             } else {
                 button.disabled = true;
             }
+
+            this.filterButtons.push({ button, available: isEnabled });
+            this.updateReadOnlyState();
 
             buttons.push(button);
             return button;
@@ -388,6 +398,7 @@ This has been reported to Google.
         this.klHistory = p.klHistory;
         this.onCopyToClipboard = p.onCopyToClipboard;
         this.onPaste = p.onPaste;
+        this.isCurrentLayerReadOnly = p.isCurrentLayerReadOnly ?? (() => false);
 
         this.rootEl = BB.el();
     }
@@ -405,5 +416,14 @@ This has been reported to Google.
 
     hide(): void {
         this.rootEl.style.display = 'none';
+    }
+
+    updateReadOnlyState(): void {
+        const readOnly = this.isCurrentLayerReadOnly();
+        for (const { button, available } of this.filterButtons) {
+            button.disabled = !available || readOnly;
+            if (readOnly) button.title = 'Frame base layer is read-only — duplicate it to edit';
+            else button.removeAttribute('title');
+        }
     }
 }

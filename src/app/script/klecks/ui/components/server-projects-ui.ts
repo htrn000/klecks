@@ -100,7 +100,7 @@ export class ServerProjectsUi {
             props: {
                 type: 'button',
                 title: `${project.name} · ${date}`,
-                'aria-label': `${LANG('server-projects-open')}: ${project.name}`,
+                ariaLabel: `${LANG('server-projects-open')}: ${project.name}`,
             },
             css: {
                 display: 'flex',
@@ -154,7 +154,7 @@ export class ServerProjectsUi {
         const rename = BB.el({
             tagName: 'button',
             className: 'kl-button',
-            props: { type: 'button', title: LANG('server-projects-rename'), 'aria-label': LANG('server-projects-rename') },
+            props: { type: 'button', title: LANG('server-projects-rename'), ariaLabel: LANG('server-projects-rename') },
             css: {
                 width: 28,
                 height: 28,
@@ -172,7 +172,7 @@ export class ServerProjectsUi {
         const remove = BB.el({
             tagName: 'button',
             className: 'kl-button',
-            props: { type: 'button', title: LANG('server-projects-delete'), 'aria-label': LANG('server-projects-delete') },
+            props: { type: 'button', title: LANG('server-projects-delete'), ariaLabel: LANG('server-projects-delete') },
             css: {
                 width: 28,
                 height: 28,

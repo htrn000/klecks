@@ -8,12 +8,12 @@ export async function klCanvasToPsdBlob(
     klCanvas: KlCanvas,
     isPreviewIncluded: boolean = true,
 ): Promise<Blob> {
-    const layerArr = klCanvas.getLayers();
+    const layerArr = klCanvas.getLayers().filter((layer) => layer.role !== 'frame-base');
 
     let canvas: HTMLCanvasElement | undefined;
     if (isPreviewIncluded) {
         // makes saving less likely to fail
-        const c = attempt(() => klCanvas.getCanvas());
+        const c = attempt(() => klCanvas.getCanvasForExport());
         if (!(c instanceof AttemptError)) {
             canvas = c;
         }
