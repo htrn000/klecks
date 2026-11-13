@@ -2285,15 +2285,20 @@ export class KlApp {
                 workspaceHeight: this.uiHeight,
                 onConfirm: (width, height, color) => {
                     this.klCanvas.reset({
+                        projectId: randomUuid(),
                         width: width,
                         height: height,
                         color: color.a === 1 ? color : undefined,
                     });
+                    activeFrameState = undefined;
+                    updateFramesUi();
 
                     this.layersUi.update(0);
                     setCurrentLayer(0);
                     this.easelProjectUpdater.update();
                     this.easel.resetOrFitTransform(true);
+                    void refreshFrameOverlays();
+                    refreshServerProjectHeader();
                 },
                 onCancel: () => {},
             });
