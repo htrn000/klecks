@@ -37,6 +37,7 @@ import { LayersUi } from '../klecks/ui/tool-tabs/layers-ui/layers-ui';
 import { FramesUi } from '../klecks/ui/tool-tabs/frames-ui';
 import {
     addFrame,
+    copyLayersToFrames,
     createFrameSet,
     deleteFrame,
     duplicateFrame,
@@ -101,6 +102,7 @@ import { ProjectPaletteUi } from '../klecks/ui/components/project-palette-ui';
 import { extractPaletteFromRgba, normalizePalette, TProjectPaletteData } from '../klecks/palette/palette-model';
 import { selectGifFrameRange, TRgbaFrame } from '../klecks/frames/gif-export';
 import { showGifExportDialog, showGifProgressDialog, TGifExportRequest } from '../klecks/ui/modals/gif-export-dialog';
+import { showCopyFrameLayersDialog } from '../klecks/ui/modals/copy-frame-layers-dialog';
 import { RemoteProjectStore } from '../klecks/storage/remote-project-store';
 import type { EditUi } from '../klecks/ui/tool-tabs/edit-ui';
 
@@ -1855,6 +1857,72 @@ export class KlApp {
             }
         };
 
+        const openCopyLayersDialog = async (): Promise<void> => {
+            applyUncommitted();
+            if (!activeFrameState || !(await updateActiveFrameFromCanvas())) return;
+            const { frameSet, activeFrameIndex } = activeFrameState;
+            showCopyFrameLayersDialog(frameSet, activeFrameIndex, ({ layerIds, targetIndexes, mode }) => {
+                void runFrameAction(async () => {
+                    if (!activeFrameState || !(await updateActiveFrameFromCanvas())) return;
+                    const state = activeFrameState;
+                    const copyImage = (image: unknown): unknown => {
+                        if (image instanceof Blob) return image.slice(0, image.size, image.type);
+                        if (image instanceof HTMLCanvasElement || image instanceof HTMLImageElement || image instanceof ImageBitmap) {
+                            const width = image instanceof HTMLImageElement ? image.naturalWidth : image.width;
+                            const height = image instanceof HTMLImageElement ? image.naturalHeight : image.height;
+                            const copy = BB.canvas(width, height);
+                            BB.ctx(copy).drawImage(image, 0, 0);
+                            return copy;
+                        }
+                        if (image instanceof Uint8Array) return image.slice();
+                        return structuredClone(image);
+                    };
+                    const result = copyLayersToFrames(
+                        state.frameSet,
+                        state.activeFrameIndex,
+                        layerIds,
+                        targetIndexes,
+                        mode,
+                        copyImage,
+                        randomUuid,
+                    );
+                    if (!result.ok) {
+                        showError(result.error.message);
+                        return;
+                    }
+                    activeFrameState = { ...state, frameSet: result.value.frameSet };
+                    for (const index of result.value.appliedTargetIndexes) {
+                        const frame = activeFrameState.frameSet.frames[index];
+                        framePixelCache.delete(frame.id);
+                        const composite = await createFrameComposite(frame, false, true);
+                        const factor = 64 / Math.max(activeFrameState.frameSet.width, activeFrameState.frameSet.height);
+                        const thumbnail = BB.canvas(
+                            Math.max(1, Math.round(activeFrameState.frameSet.width * factor)),
+                            Math.max(1, Math.round(activeFrameState.frameSet.height * factor)),
+                        );
+                        try {
+                            const ctx = BB.ctx(thumbnail);
+                            ctx.imageSmoothingEnabled = true;
+                            ctx.imageSmoothingQuality = 'high';
+                            ctx.drawImage(composite, 0, 0, thumbnail.width, thumbnail.height);
+                            frame.thumbnail = thumbnail.toDataURL('image/png');
+                        } finally {
+                            BB.freeCanvas(composite);
+                            BB.freeCanvas(thumbnail);
+                        }
+                    }
+                    serverProjectDirty = true;
+                    refreshServerProjectHeader();
+                    this.statusOverlay.out(`Copied ${result.value.copiedLayerCount} layers to ${result.value.appliedTargetIndexes.length} frames`, true);
+                    if (result.value.skippedTargetIndexes.length) {
+                        showError(LANG('frames-copy-layers-limit', {
+                            frames: result.value.skippedTargetIndexes.map((index) => index + 1).join(', '),
+                        }));
+                    }
+                });
+            });
+        };
+
         const addBlankFrame = async (): Promise<void> => {
             if (!activeFrameState) {
                 const original = await captureCurrentFrame(randomUuid());
@@ -2232,6 +2300,7 @@ export class KlApp {
             },
             onCopyOriginal: () => runFrameAction(() => copyReferenceToCurrentLayer(false)),
             onCopySelection: () => runFrameAction(() => copyReferenceToCurrentLayer(true)),
+            onCopyLayers: openCopyLayersDialog,
         });
         updateFramesUi();
         framesUi.setIsVisible(false);

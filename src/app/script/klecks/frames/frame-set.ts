@@ -98,6 +98,19 @@ export type TFrameSetOperationResult =
     | { ok: true; value: TActiveFrameSet }
     | { ok: false; error: TFrameSetError };
 
+export type TCopyLayersMode = 'replace' | 'add';
+export type TCopyLayersResult =
+    | {
+          ok: true;
+          value: {
+              frameSet: TFrameSet;
+              appliedTargetIndexes: number[];
+              skippedTargetIndexes: number[];
+              copiedLayerCount: number;
+          };
+      }
+    | { ok: false; error: TFrameSetError };
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -138,6 +151,95 @@ export function frameSetMemoryBytes(frameSet: TFrameSet): bigint {
 /** Layers intentionally omitted from PNG/PSD/GIF/R&S composites. */
 export function getExportableFrameLayers<T extends { role?: string }>(layers: readonly T[]): T[] {
     return layers.filter((layer) => layer.role !== 'frame-base');
+}
+
+/** Copy selected editable layers to target frames without mutating the source set. */
+export function copyLayersToFrames(
+    frameSet: TFrameSet,
+    sourceIndex: number,
+    layerIds: readonly string[],
+    targetIndexes: readonly number[],
+    mode: TCopyLayersMode,
+    cloneImage: (image: unknown) => unknown,
+    makeId: () => string,
+    maxLayers = maxLayersFor(frameSet.width, frameSet.height),
+): TCopyLayersResult {
+    if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= frameSet.frames.length) {
+        return { ok: false, error: { code: 'invalid-active-index', message: 'Source frame index is out of range' } };
+    }
+    if (mode !== 'replace' && mode !== 'add') {
+        return { ok: false, error: { code: 'invalid-frame-set', message: 'Copy mode is invalid' } };
+    }
+    const selected = new Set(layerIds);
+    const sourceLayers = frameSet.frames[sourceIndex].layers.filter(
+        (layer) => layer.role !== 'frame-base' && selected.has(layer.id),
+    );
+    if (!sourceLayers.length) {
+        return { ok: false, error: { code: 'invalid-layer-stack', message: 'Select at least one editable layer to copy' } };
+    }
+
+    let currentFrameSet = frameSet;
+    const appliedTargetIndexes: number[] = [];
+    const skippedTargetIndexes: number[] = [];
+    const uniqueTargets = [...new Set(targetIndexes)];
+    for (const targetIndex of uniqueTargets) {
+        if (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex >= frameSet.frames.length || targetIndex === sourceIndex) {
+            continue;
+        }
+        const target = currentFrameSet.frames[targetIndex];
+        if (!target) continue;
+        const baseLayers = target.layers.filter((layer) => layer.role === 'frame-base');
+        const nextLayerCount = mode === 'replace'
+            ? baseLayers.length + sourceLayers.length
+            : target.layers.length + sourceLayers.length;
+        if (nextLayerCount > maxLayers) {
+            skippedTargetIndexes.push(targetIndex);
+            continue;
+        }
+        let clones: TFrameLayer[];
+        try {
+            clones = sourceLayers.map((layer) => {
+                const image = cloneImage(layer.image);
+                if (layer.image !== null && typeof layer.image === 'object' && image === layer.image) {
+                    throw new Error('Image clone must return an independent image handle');
+                }
+                return { ...layer, id: makeId(), image };
+            });
+        } catch (cause) {
+            return {
+                ok: false,
+                error: {
+                    code: 'invalid-layer-stack',
+                    message: cause instanceof Error ? cause.message : 'Could not clone source layer images',
+                    frameIndex: targetIndex,
+                },
+            };
+        }
+        const nextLayers = mode === 'replace'
+            ? [...baseLayers, ...clones]
+            : [...target.layers, ...clones];
+        const frames = [...currentFrameSet.frames];
+        frames[targetIndex] = { ...target, layers: nextLayers };
+        const validated = createFrameSet({ ...currentFrameSet, frames });
+        if (!validated.ok) {
+            if (validated.error.code === 'frame-layer-limit' || validated.error.code === 'frame-set-memory-limit') {
+                skippedTargetIndexes.push(targetIndex);
+                continue;
+            }
+            return { ok: false, error: validated.error };
+        }
+        currentFrameSet = validated.value;
+        appliedTargetIndexes.push(targetIndex);
+    }
+    return {
+        ok: true,
+        value: {
+            frameSet: currentFrameSet,
+            appliedTargetIndexes,
+            skippedTargetIndexes,
+            copiedLayerCount: sourceLayers.length,
+        },
+    };
 }
 
 /**

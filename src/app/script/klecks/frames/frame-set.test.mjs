@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     addFrame,
+    copyLayersToFrames,
     createFrameSet,
     deleteFrame,
     duplicateFrame,
@@ -151,6 +152,77 @@ test('frame-base role is limited to one layer at index zero', () => {
         assert.equal(result.ok, false);
         assert.equal(result.error.code, 'invalid-layer-stack');
     }
+});
+
+const makeCopyFrameSet = () => ({
+    width: 4,
+    height: 4,
+    baseLayer: { visible: true, opacity: 0.35 },
+    frames: [
+        { id: 'source', layers: [
+            { id: 'source-base', role: 'frame-base', image: { px: 'key-1' } },
+            { id: 'source-l2', name: 'Sketch', isVisible: true, opacity: 0.75, mixModeStr: 'multiply', hasClipping: false, image: { px: 'sketch' } },
+            { id: 'source-l3', name: 'Ink', isVisible: false, opacity: 0.6, mixModeStr: 'screen', hasClipping: true, image: { px: 'ink' } },
+        ] },
+        { id: 'key-2', layers: [
+            { id: 'target-base', role: 'frame-base', image: { px: 'key-2' } },
+            { id: 'old-2', name: 'Old', image: { px: 'old-2' } },
+        ] },
+        { id: 'plain', layers: [
+            { id: 'old-3', name: 'Old', image: { px: 'old-3' } },
+        ] },
+    ],
+});
+
+test('replace copy preserves target base and replaces editable layers with independent metadata clones', () => {
+    const input = makeCopyFrameSet();
+    const baseImage = input.frames[1].layers[0].image;
+    const sourceBefore = structuredClone(input.frames[0]);
+    let next = 0;
+    const clonedImages = [];
+    const result = copyLayersToFrames(input, 0, ['source-l2', 'source-l3'], [1, 2], 'replace', (image) => {
+        const copy = structuredClone(image);
+        clonedImages.push(copy);
+        return copy;
+    }, () => `copy-${next++}`);
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.appliedTargetIndexes, [1, 2]);
+    assert.deepEqual(result.value.skippedTargetIndexes, []);
+    const target = result.value.frameSet.frames[1];
+    assert.equal(target.layers[0].id, 'target-base');
+    assert.equal(target.layers[0].image, baseImage);
+    assert.deepEqual(target.layers.slice(1).map((layer) => [layer.name, layer.isVisible, layer.opacity, layer.mixModeStr, layer.hasClipping]), [
+        ['Sketch', true, 0.75, 'multiply', false],
+        ['Ink', false, 0.6, 'screen', true],
+    ]);
+    assert.equal(target.layers[1].id, 'copy-0');
+    assert.notEqual(target.layers[1].image, input.frames[0].layers[1].image);
+    assert.notEqual(result.value.frameSet.frames[2].layers[0].image, input.frames[0].layers[1].image);
+    assert.equal(clonedImages.length, 4);
+    assert.deepEqual(input.frames[0], sourceBefore);
+});
+
+test('add-on-top preserves target editable layers and appends selected layers in source order', () => {
+    const input = makeCopyFrameSet();
+    let next = 0;
+    const result = copyLayersToFrames(input, 0, ['source-l3', 'source-l2'], [1], 'add', (image) => structuredClone(image), () => `add-${next++}`);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.frameSet.frames[1].layers.map((layer) => layer.id), [
+        'target-base', 'old-2', 'add-0', 'add-1',
+    ]);
+    assert.deepEqual(result.value.frameSet.frames[1].layers.slice(-2).map((layer) => layer.name), ['Sketch', 'Ink']);
+});
+
+test('copy skips only targets that exceed the layer cap', () => {
+    const input = makeCopyFrameSet();
+    let next = 0;
+    const result = copyLayersToFrames(input, 0, ['source-l2', 'source-l3'], [1, 2], 'replace', (image) => structuredClone(image), () => `cap-${next++}`, 2);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.skippedTargetIndexes, [1]);
+    assert.deepEqual(result.value.appliedTargetIndexes, [2]);
+    assert.deepEqual(result.value.frameSet.frames[1].layers.map((layer) => layer.id), ['target-base', 'old-2']);
+    assert.deepEqual(result.value.frameSet.frames[2].layers.map((layer) => layer.name), ['Sketch', 'Ink']);
 });
 
 test('enforces the shared per-frame layer limit', () => {

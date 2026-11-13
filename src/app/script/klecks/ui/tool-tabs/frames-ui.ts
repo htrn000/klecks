@@ -20,6 +20,7 @@ export type TFramesUiParams = {
     onOpacityChange: (opacity: number) => void;
     onCopyOriginal: () => void | Promise<void>;
     onCopySelection: () => void | Promise<void>;
+    onCopyLayers: () => void;
 };
 
 export type TFramesReferenceUiState = {
@@ -53,7 +54,7 @@ export class FramesUi {
     private iconButton(icon: IconName, title: string, callback: () => void | Promise<void>, disabled = false): HTMLButtonElement {
         const button = BB.el({
             tagName: 'button',
-            className: `kl-button ${classes.iconButton}`,
+            className: `kl-button ${classes.frameIconButton}`,
             props: { type: 'button', title, disabled: this.isBusy || disabled },
             content: getIconSvg(icon, { height: 20 }),
         }) as HTMLButtonElement;
@@ -227,10 +228,13 @@ export class FramesUi {
             !this.referenceUiState.hasReference || !this.referenceUiState.hasSelection,
         );
         this.copySelectionButton = selectionButton;
+        const activeEditableLayerCount = frameSet.frames[activeFrameIndex].layers.filter((layer) => layer.role !== 'frame-base').length;
         reference.append(
             this.iconButton('frame-reference', LANG('frames-set-reference'), this.params.onSetReference),
             this.iconButton('frame-copy-original', LANG('frames-copy-reference'), this.params.onCopyOriginal, !this.referenceUiState.hasReference),
             selectionButton,
+            this.iconButton('frame-copy-layers', LANG('frames-copy-layers'), this.params.onCopyLayers,
+                frameSet.frames.length < 2 || activeEditableLayerCount === 0),
             this.divider(),
             showOriginal.getElement(),
             showOnion.getElement(),
