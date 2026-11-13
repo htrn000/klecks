@@ -46,6 +46,7 @@ export type TLayersUiParams = {
     klHistory: KlHistory;
     onUpdateProject: () => void; // triggers update of easel
     onClearLayer: () => void;
+    onToggleReferenceLayer: () => void;
 };
 
 export class LayersUi {
@@ -72,6 +73,10 @@ export class LayersUi {
     private readonly moreDropdown: DropdownMenu<'clear-layer' | 'advanced-merge' | 'merge-all'>;
     private readonly modeSelect: SelectCustom<TMixMode>;
     private readonly clippingToggle: BoxToggle;
+    private readonly referenceLayerToggle: BoxToggle;
+    private readonly onToggleReferenceLayer: () => void;
+    private hasFrameSet = false;
+    private frameActionBusy = false;
     private oldHistoryState: number | undefined;
     private isManipulating: boolean = false;
 
@@ -538,6 +543,15 @@ export class LayersUi {
         this.addBtn.disabled = maxReached;
         this.removeBtn.disabled = oneLayer || selectedBase;
         this.duplicateBtn.disabled = maxReached;
+        this.referenceLayerToggle.getElement().style.display = this.hasFrameSet ? '' : 'none';
+        this.referenceLayerToggle.getElement().style.pointerEvents = this.frameActionBusy ? 'none' : 'auto';
+        this.referenceLayerToggle.getElement().style.opacity = this.frameActionBusy ? '0.45' : '';
+        this.referenceLayerToggle.getElement().setAttribute('aria-disabled', String(this.frameActionBusy || !this.hasFrameSet));
+        this.referenceLayerToggle.setValue(selectedBase);
+        const referenceTitle = LANG(selectedBase ? 'frames-reference-layer-detach-title' : 'frames-reference-layer-set-title');
+        this.referenceLayerToggle.getElement().title = referenceTitle;
+        this.referenceLayerToggle.getElement().setAttribute('aria-label', referenceTitle);
+        this.referenceLayerToggle.getElement().setAttribute('aria-pressed', String(selectedBase));
         this.mergeBtn.disabled = this.selectedSpotIndex === 0 || selectedBase || this.klCanvasLayerArr[this.selectedSpotIndex - 1]?.role === 'frame-base';
         this.moreDropdown.setEnabled('clear-layer', !selectedBase);
         this.moreDropdown.setEnabled('advanced-merge', !oneLayer && !selectedBase && this.klCanvasLayerArr[this.selectedSpotIndex - 1]?.role !== 'frame-base');
@@ -563,6 +577,7 @@ export class LayersUi {
         this.klHistory = p.klHistory;
         this.onUpdateProject = p.onUpdateProject;
         this.onClearLayer = p.onClearLayer;
+        this.onToggleReferenceLayer = p.onToggleReferenceLayer;
 
         this.layerElArr = [];
         this.layerHeight = 35;
@@ -623,6 +638,20 @@ export class LayersUi {
             onChange: (hasClipping) => {
                 this.klCanvas.setLayerHasClipping(this.selectedSpotIndex, hasClipping);
                 this.update(this.selectedSpotIndex);
+            },
+        });
+        this.referenceLayerToggle = new BoxToggle({
+            keepOriginalLabel: true,
+            label: getIconSvg('layer-reference', { height: 20 }),
+            title: LANG('frames-reference-layer-set-title'),
+            init: false,
+            onChange: () => {
+                if (!this.hasFrameSet || this.frameActionBusy) {
+                    this.updateButtons();
+                    return;
+                }
+                this.onToggleReferenceLayer();
+                this.updateButtons();
             },
         });
         this.moreDropdown = new DropdownMenu({
@@ -706,6 +735,7 @@ export class LayersUi {
                         this.addBtn,
                         this.removeBtn,
                         this.duplicateBtn,
+                        this.referenceLayerToggle.getElement(),
                         this.mergeBtn,
                         renameBtn,
                         this.clippingToggle.getElement(),
@@ -841,6 +871,12 @@ export class LayersUi {
         }
     }
 
+    setFrameMode(hasFrameSet: boolean, busy: boolean): void {
+        this.hasFrameSet = hasFrameSet;
+        this.frameActionBusy = busy;
+        this.updateButtons();
+    }
+
     getSelected(): number {
         return this.selectedSpotIndex;
     }
@@ -898,5 +934,6 @@ export class LayersUi {
         }
         this.isVisible = b;
         this.rootEl.style.display = b ? 'block' : 'none';
+        if (b) this.createLayerList(true);
     }
 }

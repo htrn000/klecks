@@ -48,6 +48,7 @@ import {
     TFrameSheetGeometry,
     TRnsPackageData,
 } from '../klecks/frames/frame-set';
+import { assignBaseLayer, detachBaseLayer } from '../klecks/frames/frame-base-layer';
 import { getDisplayLayerOpacity } from '../klecks/frames/display-layer-opacity';
 import { TCss, TVector2D } from '../bb/bb-types';
 import { asyncThrow, css, getFilenameDate, randomUuid, sleep } from '../bb/base/base';
@@ -1597,6 +1598,7 @@ export class KlApp {
                 onionComposite = undefined;
             }
             framesUi?.update(activeFrameState, getReferenceUiState());
+            this.layersUi?.setFrameMode(!!activeFrameState, isFrameActionInProgress);
             refreshGifExportAvailability?.();
         };
 
@@ -1906,6 +1908,7 @@ export class KlApp {
             this.toolspace.style.pointerEvents = 'none';
             this.easel.setIsFrozen(true);
             framesUi?.setBusy(true);
+            this.layersUi?.setFrameMode(!!activeFrameState, true);
             try {
                 await action();
             } catch (error) {
@@ -2088,6 +2091,80 @@ export class KlApp {
             if (!result.ok) return;
             activeFrameState = result.value;
             await restoreFrame(activeFrameState.frameSet.frames[index]);
+        };
+
+        const toggleCurrentFrameBaseLayer = async (): Promise<void> => {
+            if (!activeFrameState || !(await updateActiveFrameFromCanvas())) return;
+            const frameIndex = activeFrameState.activeFrameIndex;
+            const frame = activeFrameState.frameSet.frames[frameIndex];
+            const selectedLayer = this.klCanvas.getLayer(currentLayerIndex);
+            const isDetaching = selectedLayer.role === 'frame-base';
+            let extraCanvas: HTMLCanvasElement | undefined;
+            let updatedFrame: TFrame;
+            let nextActiveLayerIndex = 0;
+
+            if (isDetaching) {
+                updatedFrame = detachBaseLayer(frame);
+                this.statusOverlay.out(LANG('frames-reference-layer-detached'), true);
+            } else {
+                const baseAppearance = activeFrameState.frameSet.baseLayer ?? {
+                    visible: showOriginal,
+                    opacity: overlayOpacity,
+                };
+                const assigned = assignBaseLayer(frame, selectedLayer.id, () => {
+                    if (this.klCanvas.isLayerLimitReached()) return undefined;
+                    extraCanvas = BB.canvas(activeFrameState!.frameSet.width, activeFrameState!.frameSet.height);
+                    return {
+                        id: randomUuid(),
+                        name: LANG('layers-layer') + ' ' + (frame.layers.length + 1),
+                        isVisible: true,
+                        opacity: 1,
+                        mixModeStr: 'source-over',
+                        hasClipping: false,
+                        image: extraCanvas,
+                    };
+                });
+                updatedFrame = {
+                    ...assigned,
+                    layers: assigned.layers.map((layer) => layer.role === 'frame-base'
+                        ? { ...layer, isVisible: baseAppearance.visible, opacity: baseAppearance.opacity }
+                        : layer),
+                };
+                nextActiveLayerIndex = updatedFrame.layers.findIndex((layer) => layer.role !== 'frame-base');
+                if (nextActiveLayerIndex < 0) nextActiveLayerIndex = 0;
+                this.statusOverlay.out(LANG('frames-reference-layer-set'), true);
+            }
+
+            const frames = [...activeFrameState.frameSet.frames];
+            frames[frameIndex] = updatedFrame;
+            const result = createFrameSet({
+                ...activeFrameState.frameSet,
+                frames,
+                ...(isDetaching ? {} : {
+                    baseLayer: activeFrameState.frameSet.baseLayer ?? {
+                        visible: showOriginal,
+                        opacity: overlayOpacity,
+                    },
+                }),
+            });
+            if (!result.ok) {
+                if (extraCanvas) BB.freeCanvas(extraCanvas);
+                showFrameLimitError();
+                return;
+            }
+            activeFrameState = { frameSet: result.value, activeFrameIndex: frameIndex };
+            framePixelCache.delete(frame.id);
+            dropCachedFrameHistories(frameHistoryCache, frameHistoryLru, [frame.id]);
+            historyFrameId = undefined;
+            try {
+                if (!(await restoreFrame(updatedFrame))) return;
+                setCurrentLayer(nextActiveLayerIndex);
+                this.layersUi.update(nextActiveLayerIndex, true);
+                if (!(await updateActiveFrameFromCanvas())) return;
+                updateFramesUi();
+            } finally {
+                if (extraCanvas) BB.freeCanvas(extraCanvas);
+            }
         };
 
         const brushDiv = BB.el();
@@ -2330,6 +2407,7 @@ export class KlApp {
             klHistory: this.klHistory,
             onUpdateProject: () => this.easelProjectUpdater.update(),
             onClearLayer: () => clearLayer(false, true),
+            onToggleReferenceLayer: () => runFrameAction(toggleCurrentFrameBaseLayer),
         });
         framesUi = new FramesUi({
             onAdd: () => runFrameAction(addBlankFrame),
