@@ -63,6 +63,7 @@ Renaming a key across multiple language files:
   "frames-show-original": "Show original",
   "frames-onion-skin": "Onion skin",
   "frames-overlay-opacity": "Overlay opacity",
+  "frames-other-layer-opacity": "Other layer opacity",
   "frames-reference-unavailable": "Reference image could not be loaded.",
   "frames-copy-reference": "Copy original to current layer",
   "frames-copy-reference-selection": "Copy original selection to current layer",

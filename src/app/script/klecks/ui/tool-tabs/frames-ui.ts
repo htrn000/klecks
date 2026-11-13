@@ -18,6 +18,7 @@ export type TFramesUiParams = {
     onToggleOriginal: (show: boolean) => void;
     onToggleOnion: (show: boolean) => void;
     onOpacityChange: (opacity: number) => void;
+    onOtherLayerOpacityChange: (opacity: number) => void;
     onCopyOriginal: () => void | Promise<void>;
     onCopySelection: () => void | Promise<void>;
     onCopyLayers: () => void;
@@ -29,6 +30,7 @@ export type TFramesReferenceUiState = {
     showOriginal: boolean;
     showOnion: boolean;
     opacity: number;
+    otherLayerOpacity: number;
     hasSelection: boolean;
 };
 
@@ -39,12 +41,14 @@ export class FramesUi {
     private state: TActiveFrameSet | undefined;
     private activeThumbnailEl: HTMLImageElement | HTMLSpanElement | undefined;
     private opacitySlider: KlSlider | undefined;
+    private otherLayerOpacitySlider: KlSlider | undefined;
     private referenceUiState: TFramesReferenceUiState = {
         hasReference: false,
         canShowOnion: false,
         showOriginal: false,
         showOnion: false,
         opacity: 0.35,
+        otherLayerOpacity: 1,
         hasSelection: false,
     };
     private copySelectionButton: HTMLButtonElement | undefined;
@@ -125,6 +129,30 @@ export class FramesUi {
         if (!isDragging) this.opacitySlider.setValue(this.referenceUiState.opacity);
         this.opacitySlider.setIsEnabled(!this.isBusy);
         return this.opacitySlider;
+    }
+
+    private getOtherLayerOpacitySlider(): KlSlider {
+        if (!this.otherLayerOpacitySlider) {
+            const panelWidth = this.rootEl.clientWidth || 250;
+            this.otherLayerOpacitySlider = new KlSlider({
+                label: LANG('frames-other-layer-opacity'),
+                width: Math.min(250, panelWidth),
+                height: 30,
+                min: 0,
+                max: 1,
+                value: this.referenceUiState.otherLayerOpacity,
+                displayScale: 100,
+                onChange: (value) => this.params.onOtherLayerOpacityChange(value),
+            });
+            this.otherLayerOpacitySlider.getElement().style.marginTop = '2px';
+            this.otherLayerOpacitySlider.getElement().style.marginBottom = '6px';
+            this.otherLayerOpacitySlider.getElement().title = LANG('frames-other-layer-opacity');
+        }
+        const sliderElement = this.otherLayerOpacitySlider.getElement();
+        const isDragging = !!sliderElement.querySelector('.slider-wrapper--active');
+        if (!isDragging) this.otherLayerOpacitySlider.setValue(this.referenceUiState.otherLayerOpacity);
+        this.otherLayerOpacitySlider.setIsEnabled(!this.isBusy);
+        return this.otherLayerOpacitySlider;
     }
 
     private render(): void {
@@ -243,6 +271,7 @@ export class FramesUi {
         if (this.referenceUiState.showOriginal || this.referenceUiState.showOnion) {
             this.rootEl.append(this.getOpacitySlider().getElement());
         }
+        this.rootEl.append(this.getOtherLayerOpacitySlider().getElement());
     }
 
     constructor(params: TFramesUiParams) {

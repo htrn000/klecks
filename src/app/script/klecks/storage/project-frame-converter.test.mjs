@@ -13,6 +13,7 @@ test('FrameSet project/storage conversion preserves geometry, order, active inde
         height: 510,
         activeFrameIndex: 2,
         baseLayer: { visible: true, opacity: 0.8 },
+        otherLayerOpacity: 0.3,
         sheet: {
             cellWidth: 600,
             cellHeight: 510,
@@ -106,6 +107,23 @@ test('old single-frame project shape remains frame-free through conversion', asy
     const restoredFrames = await storedFramesToProject(undefined, (image) => image);
     assert.equal(recordFrames, undefined);
     assert.equal(restoredFrames, undefined);
+});
+
+test('other-layer display opacity round-trips and defaults to 1 for older frame records', async () => {
+    const frameSet = {
+        width: 1,
+        height: 1,
+        activeFrameIndex: 0,
+        frames: [{ id: 'f1', layers: [{ id: 'l1', image: 'png' }] }],
+    };
+    const olderStored = await projectFramesToStored(frameSet, (image) => image);
+    assert.equal(olderStored.otherLayerOpacity, 1);
+    const olderRestored = await storedFramesToProject(olderStored, (blob) => blob);
+    assert.equal(olderRestored.otherLayerOpacity, 1);
+
+    const newStored = await projectFramesToStored({ ...frameSet, otherLayerOpacity: 0.25 }, (image) => image);
+    const newRestored = await storedFramesToProject(newStored, (blob) => blob);
+    assert.equal(newRestored.otherLayerOpacity, 0.25);
 });
 
 test('project referenceTrack PNG handles round-trip through the reserved storage slot', async () => {

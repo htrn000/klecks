@@ -48,6 +48,7 @@ import {
     TFrameSheetGeometry,
     TRnsPackageData,
 } from '../klecks/frames/frame-set';
+import { getDisplayLayerOpacity } from '../klecks/frames/display-layer-opacity';
 import { TCss, TVector2D } from '../bb/bb-types';
 import { asyncThrow, css, getFilenameDate, randomUuid, sleep } from '../bb/base/base';
 import { createConsoleApi } from './console-api';
@@ -905,6 +906,15 @@ export class KlApp {
             klCanvas: this.klCanvas,
             easel: this.easel,
             getRenderOverlays: () => renderOverlays,
+            getDisplayLayerOpacity: (layer, index) => activeFrameState
+                ? getDisplayLayerOpacity(
+                    layer.opacity,
+                    index === currentLayerIndex,
+                    layer.role === 'frame-base',
+                    activeFrameState.frameSet.otherLayerOpacity ?? 1,
+                    overlayOpacity,
+                )
+                : layer.opacity,
         });
         this.klHistory.addListener(() => {
             this.easelProjectUpdater.update();
@@ -1548,6 +1558,7 @@ export class KlApp {
         const setCurrentLayer = (index: number) => {
             currentLayerIndex = index;
             currentBrushUi.setLayer(this.klCanvas.getLayer(currentLayerIndex));
+            this.easelProjectUpdater.update();
             const isFrameBase = this.klCanvas.getLayer(index).role === 'frame-base';
             this.easel.setIsFrozen(isFrameBase || KL.DIALOG_COUNTER.get() > 0);
             editUi?.updateReadOnlyState();
@@ -1566,6 +1577,7 @@ export class KlApp {
                 showOriginal,
                 showOnion: showOnionSkin,
                 opacity: overlayOpacity,
+                otherLayerOpacity: state?.frameSet.otherLayerOpacity ?? 1,
             };
         };
 
@@ -2352,6 +2364,14 @@ export class KlApp {
                     this.easelProjectUpdater.update();
                 }
                 void refreshFrameOverlays();
+            },
+            onOtherLayerOpacityChange: (opacity) => {
+                if (!activeFrameState) return;
+                const result = createFrameSet({ ...activeFrameState.frameSet, otherLayerOpacity: opacity });
+                if (!result.ok) return;
+                activeFrameState = { ...activeFrameState, frameSet: result.value };
+                this.easelProjectUpdater.update();
+                framesUi?.update(activeFrameState, getReferenceUiState());
             },
             onCopyOriginal: () => runFrameAction(() => copyReferenceToCurrentLayer(false)),
             onCopySelection: () => runFrameAction(() => copyReferenceToCurrentLayer(true)),

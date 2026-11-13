@@ -8,6 +8,7 @@ export type TEaselProjectUpdaterParams<T extends string> = {
     klCanvas: KlCanvas;
     easel: Easel<T>;
     getRenderOverlays?: () => { image: CanvasImageSource; opacity: number }[];
+    getDisplayLayerOpacity?: (layer: ReturnType<KlCanvas['getLayers']>[number], index: number) => number;
 };
 
 /**
@@ -18,6 +19,7 @@ export class EaselProjectUpdater<T extends string> {
     private readonly klCanvas: KlCanvas;
     private readonly easel: Easel<T>;
     private readonly getRenderOverlays: NonNullable<TEaselProjectUpdaterParams<T>['getRenderOverlays']>;
+    private readonly getDisplayLayerOpacity: NonNullable<TEaselProjectUpdaterParams<T>['getDisplayLayerOpacity']>;
     private compositeCanvas: HTMLCanvasElement | undefined;
 
     // ----------------------------------- public -----------------------------------
@@ -25,6 +27,7 @@ export class EaselProjectUpdater<T extends string> {
         this.klCanvas = p.klCanvas;
         this.easel = p.easel;
         this.getRenderOverlays = p.getRenderOverlays ?? (() => []);
+        this.getDisplayLayerOpacity = p.getDisplayLayerOpacity ?? ((layer) => layer.opacity);
         this.update();
     }
 
@@ -48,7 +51,7 @@ export class EaselProjectUpdater<T extends string> {
         this.easel.setProject({
             width,
             height,
-            layers: layers.map((layer) => {
+            layers: layers.map((layer, index) => {
                 return {
                     image:
                         layer.compositeObj && compositeCanvas
@@ -65,7 +68,7 @@ export class EaselProjectUpdater<T extends string> {
                               }
                             : layer.canvas,
                     isVisible: layer.isVisible,
-                    opacity: layer.opacity,
+                    opacity: this.getDisplayLayerOpacity(layer, index),
                     mixModeStr: layer.mixModeStr,
                     hasClipping: layer.hasClipping,
                 };

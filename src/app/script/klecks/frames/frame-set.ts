@@ -58,6 +58,8 @@ export type TFrameSet = {
     referenceTrack?: Record<string, unknown>;
     /** Shared display settings for imported frame-base layers. */
     baseLayer?: { visible: boolean; opacity: number };
+    /** Display-only multiplier for editable layers other than the active layer. */
+    otherLayerOpacity?: number;
 };
 
 /** Project-level FrameSet payload with the frame selected when the project was last stored. */
@@ -250,7 +252,7 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
     if (!isRecord(input)) {
         return error('invalid-frame-set', 'FrameSet must be an object');
     }
-    const { width, height, frames, sheet, referenceTrack, rnsPackage, baseLayer } = input;
+    const { width, height, frames, sheet, referenceTrack, rnsPackage, baseLayer, otherLayerOpacity } = input;
     if (!isPositiveSafeInteger(width) || !isPositiveSafeInteger(height)) {
         return error('invalid-size', 'Frame width and height must be positive safe integers');
     }
@@ -334,6 +336,11 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
         }
     }
 
+    if (otherLayerOpacity !== undefined &&
+        (typeof otherLayerOpacity !== 'number' || !Number.isFinite(otherLayerOpacity) || otherLayerOpacity < 0 || otherLayerOpacity > 1)) {
+        return error('invalid-frame-set', 'Other layer opacity must be between 0 and 1');
+    }
+
     let validatedReferenceTrack: Record<string, unknown> | undefined;
     if (referenceTrack !== undefined) {
         if (!isRecord(referenceTrack)) {
@@ -409,6 +416,7 @@ export function validateFrameSet(input: unknown): TFrameSetValidationResult {
             ...(rnsPackage ? { rnsPackage: rnsPackage as unknown as TRnsPackageData } : {}),
             ...(validatedReferenceTrack ? { referenceTrack: validatedReferenceTrack } : {}),
             ...(validatedBaseLayer ? { baseLayer: validatedBaseLayer } : {}),
+            otherLayerOpacity: otherLayerOpacity === undefined ? 1 : otherLayerOpacity as number,
         },
         memoryBytes,
     };
@@ -453,6 +461,7 @@ function operationResult(
         ...(original.rnsPackage ? { rnsPackage: original.rnsPackage } : {}),
         ...(referenceTrack ? { referenceTrack } : {}),
         ...(original.baseLayer ? { baseLayer: original.baseLayer } : {}),
+        otherLayerOpacity: original.otherLayerOpacity ?? 1,
     });
     return validation.ok
         ? { ok: true, value: { frameSet: validation.value, activeFrameIndex } }

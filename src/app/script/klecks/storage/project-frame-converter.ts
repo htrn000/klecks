@@ -25,6 +25,7 @@ export async function projectFramesToStored<TImage>(
         activeFrameIndex: frameSet.activeFrameIndex,
         ...(frameSet.sheet ? { sheet: { ...frameSet.sheet } } : {}),
         ...(frameSet.baseLayer ? { baseLayer: { ...frameSet.baseLayer } } : {}),
+        otherLayerOpacity: frameSet.otherLayerOpacity ?? 1,
         ...(frameSet.rnsPackage ? { rnsPackage: frameSet.rnsPackage } : {}),
         ...(frameSet.referenceTrack
             ? {
@@ -72,6 +73,7 @@ export async function storedFramesToProject<TImage>(
         activeFrameIndex: frameSet.activeFrameIndex,
         ...(frameSet.sheet ? { sheet: { ...frameSet.sheet } } : {}),
         ...(frameSet.baseLayer ? { baseLayer: { ...frameSet.baseLayer } } : {}),
+        otherLayerOpacity: frameSet.otherLayerOpacity ?? 1,
         ...(frameSet.rnsPackage ? { rnsPackage: frameSet.rnsPackage } : {}),
         ...(frameSet.referenceTrack
             ? {
