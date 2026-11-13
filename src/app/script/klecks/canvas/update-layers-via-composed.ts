@@ -17,6 +17,8 @@ export function updateLayersViaComposed(
     const sizeDidChange =
         before.size.width !== after.size.width || before.size.height !== after.size.height;
 
+    // role is not tracked in history; it is fixed per layer id
+    const roleById = new Map(layers.map((layer) => [layer.id, layer.role]));
     return Object.entries(after.layerMap)
         .map(([id, composedAfterLayer]) => {
             let canvas = {} as HTMLCanvasElement;
@@ -94,6 +96,7 @@ export function updateLayersViaComposed(
                 hasClipping: composedAfterLayer.hasClipping,
                 isVisible: composedAfterLayer.isVisible,
                 opacity: composedAfterLayer.opacity,
+                ...(roleById.get(id) ? { role: roleById.get(id) } : {}),
                 canvas,
                 context,
             };
