@@ -403,6 +403,14 @@ export class KlApp {
         }
 
         this.klCanvas = new KL.KlCanvas(this.klHistory, this.embed ? -1 : 1);
+        let serverProjectDirty = false;
+        let serverProjectCleanChangeCount = this.klHistory.getChangeCount();
+        let refreshServerProjectHeader = () => {};
+        const markServerProjectClean = () => {
+            serverProjectCleanChangeCount = this.klHistory.getChangeCount();
+            serverProjectDirty = false;
+            refreshServerProjectHeader();
+        };
         const tempHistory = new KlTempHistory();
         let mainTabRow: TabRow | undefined = undefined;
         let activeFrameState: TActiveFrameSet | undefined;
@@ -872,6 +880,8 @@ export class KlApp {
         });
         this.klHistory.addListener(() => {
             this.easelProjectUpdater.update();
+            serverProjectDirty = this.klHistory.getChangeCount() !== serverProjectCleanChangeCount;
+            refreshServerProjectHeader();
         });
         KL.DIALOG_COUNTER.subscribe((count) => {
             this.easel.setIsFrozen(count > 0);
@@ -2379,11 +2389,19 @@ export class KlApp {
         };
 
         const onOpenServerProject = async (id: string) => {
+            const hasUnsavedChanges = serverProjectDirty ||
+                this.klHistory.getChangeCount() !== serverProjectCleanChangeCount;
+            if (
+                id !== this.klCanvas.getProject().projectId &&
+                hasUnsavedChanges &&
+                !window.confirm(LANG('server-projects-open-unsaved-confirm'))
+            ) return;
             let closeLoader: (() => void) | undefined;
             showModal({ message: LANG('loading'), callback: () => { closeLoader = undefined; }, closeFunc: (f) => { closeLoader = f; } });
             try {
                 const project = await remoteProjectStore.read(id);
                 if (!project || !(await restoreStoredProject(project))) throw new Error('Unable to restore project');
+                markServerProjectClean();
                 this.statusOverlay.out(LANG('server-projects-restored'));
             } catch (error) {
                 showError(LANG('file-storage-open-failed'));
@@ -2902,11 +2920,17 @@ export class KlApp {
                   },
                   klRecoveryManager,
                   onOpenBrowserStorage,
-                  onOpenServerProject: (id) => void onOpenServerProject(id),
+                  onOpenServerProject,
+                  onSetServerProjectId: (id) => this.klCanvas.setProjectId(id),
+                  onServerProjectSaved: (name) => {
+                      markServerProjectClean();
+                      this.statusOverlay.out(`${LANG('server-projects-saved')} ${name}`);
+                  },
                   onStoredToBrowserStorage: () => {
                       this.updateLastSaved();
                   },
               });
+        refreshServerProjectHeader = () => fileUi?.refreshServerProjectBinding();
         refreshGifExportAvailability = () => fileUi?.refresh();
 
         if (!this.embed && projectStore) {

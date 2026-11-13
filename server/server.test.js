@@ -52,3 +52,24 @@ test('writes use atomic rename and leave no temporary files after success', asyn
     assert.deepEqual(files.sort(), ['blobs', 'project.json']);
     assert.equal(JSON.parse(await readFile(path.join(dataDir, 'a/project.json'), 'utf8')).name, 'A');
 });
+
+test('PATCH renames metadata atomically without rewriting blobs; validates names and missing ids', async (t) => {
+    const { base, dataDir } = await fixture(t);
+    const put = await fetch(`${base}/api/projects/a`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload('Before')) });
+    assert.equal(put.status, 200);
+    const before = await (await fetch(`${base}/api/projects/a`)).json();
+    const blobFilesBefore = await readdir(path.join(dataDir, 'a/blobs'));
+
+    const renamed = await fetch(`${base}/api/projects/a`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: '  Renamed project  ' }) });
+    assert.equal(renamed.status, 200);
+    assert.equal((await renamed.json()).name, 'Renamed project');
+    const after = await (await fetch(`${base}/api/projects/a`)).json();
+    assert.equal(after.name, 'Renamed project');
+    assert.deepEqual(after.blobs, before.blobs);
+    assert.deepEqual(await readdir(path.join(dataDir, 'a/blobs')), blobFilesBefore);
+
+    assert.equal((await fetch(`${base}/api/projects/a`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: '  ' }) })).status, 400);
+    assert.equal((await fetch(`${base}/api/projects/a`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'x'.repeat(201) }) })).status, 400);
+    assert.equal((await fetch(`${base}/api/projects/missing`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'No project' }) })).status, 404);
+    assert.equal((await (await fetch(`${base}/api/projects/a`)).json()).name, 'Renamed project');
+});

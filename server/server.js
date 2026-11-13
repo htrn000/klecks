@@ -126,6 +126,20 @@ async function commitProject(dataDir, id, name, input) {
     return record;
 }
 
+async function renameProject(dataDir, id, name) {
+    if (typeof name !== 'string' || !name.trim() || name.trim().length > 200) {
+        throw fail(400, 'Project name must contain 1 to 200 characters');
+    }
+    const record = await readProjectDirectory(dataDir, id);
+    if (!record) throw fail(404, 'Project not found');
+    const updated = { ...record, name: name.trim(), updatedAt: Date.now() };
+    const projectPath = path.join(dataDir, id, 'project.json');
+    const temporaryProjectPath = `${projectPath}.tmp-${randomUUID()}`;
+    await writeFile(temporaryProjectPath, JSON.stringify(updated), { flag: 'wx' });
+    await rename(temporaryProjectPath, projectPath);
+    return updated;
+}
+
 export function createApiServer(options = {}) {
     const dataDir = path.resolve(options.dataDir ?? process.env.DATA_DIR ?? '/data');
     const maxRequestBytes = options.maxRequestBytes ?? Number(process.env.MAX_REQUEST_BYTES || DEFAULT_MAX_REQUEST_BYTES);
@@ -183,6 +197,11 @@ export function createApiServer(options = {}) {
             if (request.method === 'PUT') {
                 const body = await readJsonBody(request, maxRequestBytes);
                 const record = await commitProject(dataDir, id, body.name, body);
+                return sendJson(response, 200, { id: record.id, name: record.name, updatedAt: record.updatedAt, size: record.size });
+            }
+            if (request.method === 'PATCH') {
+                const body = await readJsonBody(request, maxRequestBytes);
+                const record = await renameProject(dataDir, id, body.name);
                 return sendJson(response, 200, { id: record.id, name: record.name, updatedAt: record.updatedAt, size: record.size });
             }
             if (request.method === 'DELETE') {

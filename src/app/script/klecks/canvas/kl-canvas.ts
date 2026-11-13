@@ -1207,6 +1207,13 @@ export class KlCanvas {
         };
     }
 
+    /** Change the project identity through history without disturbing layer/frame content. */
+    setProjectId(projectId: string): void {
+        if (!projectId) throw new Error('projectId must not be empty');
+        if (projectId === this.klHistory.getComposed().projectId.value) return;
+        this.klHistory.push({ projectId: { value: projectId } });
+    }
+
     setMixMode(layerIndex: number, mixModeStr: TMixMode): void {
         const targetLayer = this.layers[layerIndex];
         targetLayer.mixModeStr = mixModeStr;

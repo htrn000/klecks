@@ -2,12 +2,24 @@ import type { TDeserializedKlStorageProject, TKlProject } from '../kl-types';
 import type { TKlStorageProjectRead, TKlStorageProjectWrite } from './project-converter';
 
 export type TRemoteProjectMeta = { id: string; name: string; updatedAt: number; size: number; thumbnailUrl: string };
+export type TServerSaveDecision = { action: 'update'; project: TRemoteProjectMeta } | { action: 'create' };
 type TRemoteRecord = TRemoteProjectMeta & { project: TKlStorageProjectWrite; blobs: Record<string, string> };
 type TConverter = {
     createStorageProject(project: TKlProject): Promise<TKlStorageProjectWrite>;
     readStorageProject(record: TKlStorageProjectRead): Promise<TDeserializedKlStorageProject>;
 };
 type TBlobMarker = { $blob: string; $kind: 'blob' | 'bytes' };
+
+export function getServerSaveDecision(projectId: string, projects: readonly TRemoteProjectMeta[]): TServerSaveDecision {
+    const project = projects.find((item) => item.id === projectId);
+    return project ? { action: 'update', project } : { action: 'create' };
+}
+
+export function createNewServerProjectId(currentId: string, generateId: () => string): string {
+    let id = generateId();
+    while (id === currentId) id = generateId();
+    return id;
+}
 
 function toBase64(bytes: Uint8Array): string {
     let binary = '';
@@ -132,6 +144,14 @@ export class RemoteProjectStore {
         const response = await this.fetcher(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
         if (!response.ok && response.status !== 404) throw new Error(`Server project delete failed (${response.status})`);
         if (id === this.currentId) this.currentId = undefined;
+    }
+
+    async rename(id: string, name: string): Promise<TRemoteProjectMeta> {
+        const response = await this.fetcher(`/api/projects/${encodeURIComponent(id)}`, {
+            method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }),
+        });
+        if (!response.ok) throw new Error(`Server project rename failed (${response.status})`);
+        return await response.json() as TRemoteProjectMeta;
     }
 
     thumbnailUrl(id: string): string { return `/api/projects/${encodeURIComponent(id)}/thumbnail`; }

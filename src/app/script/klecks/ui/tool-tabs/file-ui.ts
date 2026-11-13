@@ -62,7 +62,9 @@ export type TFileUiParams = {
     onChangeShowSaveDialog: (b: boolean) => void;
     klRecoveryManager?: KlRecoveryManager;
     onOpenBrowserStorage: () => void;
-    onOpenServerProject: (id: string) => void;
+    onOpenServerProject: (id: string) => Promise<void>;
+    onSetServerProjectId: (id: string) => void;
+    onServerProjectSaved: (name: string) => void;
     onStoredToBrowserStorage: () => void;
 };
 
@@ -76,6 +78,7 @@ export class FileUi {
     private importInput: undefined | HTMLInputElement;
     private gifExportButton: HTMLButtonElement | undefined;
     private browserStorageUi: undefined | BrowserStorageUi;
+    private serverProjectsUi: undefined | ServerProjectsUi;
     private klRecoveryManager: KlRecoveryManager | undefined;
     private recoveryCountBubble: HTMLElement | undefined;
     private recoveryListener: TKlRecoveryListener = (metas) => {
@@ -267,11 +270,13 @@ export class FileUi {
             });
 
             // --- browser storage ---
-            const serverProjectsUi = p.remoteProjectStore ? new ServerProjectsUi({
+            this.serverProjectsUi = p.remoteProjectStore ? new ServerProjectsUi({
                 store: p.remoteProjectStore,
                 getProject: p.getProject,
                 applyUncommitted: this.applyUncommitted,
                 onOpen: p.onOpenServerProject,
+                onSetProjectId: p.onSetServerProjectId,
+                onSaved: p.onServerProjectSaved,
             }) : undefined;
             let browserStorageFallbackEl: HTMLElement | undefined;
             if (p.projectStore) {
@@ -399,7 +404,7 @@ export class FileUi {
                 saveRow,
                 createSpacer(),
                 this.browserStorageUi?.getElement(),
-                serverProjectsUi?.getElement(),
+                this.serverProjectsUi?.getElement(),
                 browserStorageFallbackEl,
                 createSpacer(),
                 recoveryWrapper,
@@ -414,6 +419,10 @@ export class FileUi {
 
     refresh(): void {
         if (this.gifExportButton) this.gifExportButton.disabled = !this.isFrameSetAvailable();
+    }
+
+    refreshServerProjectBinding(): void {
+        this.serverProjectsUi?.refreshCurrentBinding();
     }
 
     getElement(): HTMLElement {

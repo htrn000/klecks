@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeRemoteRecord, encodeRemoteRecord, RemoteProjectStore } from './remote-project-store.ts';
+import {
+    createNewServerProjectId,
+    decodeRemoteRecord,
+    encodeRemoteRecord,
+    getServerSaveDecision,
+    RemoteProjectStore,
+} from './remote-project-store.ts';
 
 test('remote binary record encoding preserves Blob and Uint8Array fields', async () => {
     const record = { thumbnail: new Blob([new Uint8Array([1, 2, 3])]), frames: { sheet: { trailingPixels: new Uint8Array([8, 9]) } } };
@@ -66,4 +72,38 @@ test('availability warns on client errors but not missing routes or network fail
     } finally {
         console.warn = originalWarn;
     }
+});
+
+test('save policy updates a matching id and creates when it is not listed', () => {
+    const projects = [{ id: 'old-id', name: 'Old drawing', updatedAt: 1, size: 2, thumbnailUrl: '/old.png' }];
+    assert.deepEqual(getServerSaveDecision('old-id', projects), { action: 'update', project: projects[0] });
+    assert.deepEqual(getServerSaveDecision('new-id', projects), { action: 'create' });
+});
+
+test('save-as-new chooses a different canvas id and writes to its new server slot', async () => {
+    const urls = [];
+    const converter = {
+        createStorageProject: async (project) => ({ id: 1, projectId: project.projectId, thumbnail: new Blob(['t']), layers: [] }),
+        readStorageProject: async () => undefined,
+    };
+    const fetcher = async (url, options = {}) => {
+        urls.push([url, options.method]);
+        return new Response(JSON.stringify({ id: 'new-id', name: 'Copy', updatedAt: 2, size: 1, thumbnailUrl: '/thumb' }), { status: 200 });
+    };
+    const idSequence = ['old-id', 'new-id'];
+    const newId = createNewServerProjectId('old-id', () => idSequence.shift());
+    assert.equal(newId, 'new-id');
+    const store = new RemoteProjectStore(fetcher, converter);
+    await store.store({ projectId: newId }, 'Copy', newId);
+    assert.deepEqual(urls, [['/api/projects/new-id', 'PUT']]);
+});
+
+test('RemoteProjectStore rename sends a metadata PATCH', async () => {
+    const calls = [];
+    const store = new RemoteProjectStore(async (url, options) => {
+        calls.push([url, options.method, JSON.parse(options.body)]);
+        return new Response(JSON.stringify({ id: 'p-1', name: 'Renamed', updatedAt: 2, size: 5, thumbnailUrl: '/thumb' }), { status: 200 });
+    });
+    assert.equal((await store.rename('p-1', 'Renamed')).name, 'Renamed');
+    assert.deepEqual(calls, [['/api/projects/p-1', 'PATCH', { name: 'Renamed' }]]);
 });
